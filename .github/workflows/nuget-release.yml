@@ -32,10 +32,10 @@ jobs:
           dotnet-version: ${{ matrix.sdk }}
 
       - name: Restore dependencies (${{ matrix.tfm }})
-        run: dotnet restore -p:TargetFramework=${{ matrix.tfm }}
+        run: dotnet restore -p:TargetFrameworks=${{ matrix.tfm }}
 
       - name: Build (${{ matrix.tfm }})
-        run: dotnet build --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
+        run: dotnet build --configuration Release --no-restore -p:TargetFrameworks=${{ matrix.tfm }}
 
       - name: Test with coverage (SDK 8, target net8.0)
         if: matrix.tfm == 'net8.0'
@@ -72,7 +72,7 @@ jobs:
         continue-on-error: true
 
       - name: Pack NuGet package (${{ matrix.tfm }})
-        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=${{ matrix.tfm }} --no-build --no-restore --output ./nupkgs
+        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFrameworks=${{ matrix.tfm }} --no-build --no-restore --output ./nupkgs
 
       - name: Upload NuGet package artifact
         uses: actions/upload-artifact@v4
@@ -105,11 +105,14 @@ jobs:
             dotnet nuget push "$pkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json; \
           done
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Create or Update GitHub Release
+        uses: ncipollo/release-action@v1
         with:
+          tag: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          body_path: ./CHANGELOG.md
-          files: ./nupkgs/**/SitecoreGraphQLClient*.nupkg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          bodyFile: ./CHANGELOG.md
+          artifacts: ./nupkgs/**/SitecoreGraphQLClient*.nupkg
+          allowUpdates: true
+          replacesArtifacts: true
+          makeLatest: true
+          token: ${{ secrets.GITHUB_TOKEN }}

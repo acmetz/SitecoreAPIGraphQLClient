@@ -30,10 +30,10 @@ jobs:
           dotnet-version: ${{ matrix.sdk }}
 
       - name: Restore dependencies (${{ matrix.tfm }})
-        run: dotnet restore -p:TargetFramework=${{ matrix.tfm }}
+        run: dotnet restore -p:TargetFrameworks=${{ matrix.tfm }}
 
       - name: Build (${{ matrix.tfm }})
-        run: dotnet build --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
+        run: dotnet build --configuration Release --no-restore -p:TargetFrameworks=${{ matrix.tfm }}
 
       - name: Test with coverage (SDK 8, target net8.0)
         if: matrix.tfm == 'net8.0'
