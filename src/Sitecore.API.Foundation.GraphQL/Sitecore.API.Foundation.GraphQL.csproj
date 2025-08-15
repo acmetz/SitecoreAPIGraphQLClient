@@ -23,7 +23,7 @@
     <PackageProjectUrl>https://github.com/acmetz/SitecoreAPIGraphQLClient</PackageProjectUrl>
     <!-- Set a license expression if applicable; update if your repo uses a different license -->
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <!-- Include README in NuGet (optional; enable when packing) -->
+    <!-- Include README in NuGet -->
     <PackageReadmeFile>README.md</PackageReadmeFile>
 
     <!-- Build Configuration -->
@@ -61,6 +61,11 @@
     <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.8" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.8" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.8" />
+  </ItemGroup>
+
+  <!-- Ensure the README from repository root is included in the package -->
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
 </Project>
