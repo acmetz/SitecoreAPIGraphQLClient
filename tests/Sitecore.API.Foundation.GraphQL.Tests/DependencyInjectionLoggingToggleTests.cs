@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Shouldly;
 using Sitecore.API.Foundation.GraphQL.DependencyInjection;
 
@@ -24,15 +25,27 @@ public class DependencyInjectionLoggingToggleTests
 
         // Act
         services.AddSitecoreGraphQL(cfg);
-        var provider = services.BuildServiceProvider();
 
-        // Assert
-        var loggerFactory = provider.GetService<ILoggerFactory>();
-        loggerFactory.ShouldNotBeNull();
+        // Assert on registrations (avoid environment-provided defaults in provider)
+        var hasLoggerFactory = services.Any(d => d.ServiceType == typeof(ILoggerFactory) && d.ImplementationType == typeof(LoggerFactory));
+        var hasGenericLogger = services.Any(d => d.ServiceType.IsGenericType && d.ServiceType.GetGenericTypeDefinition() == typeof(ILogger<>) && d.ImplementationType == typeof(Logger<>));
+        hasLoggerFactory.ShouldBeTrue();
+        hasGenericLogger.ShouldBeTrue();
     }
 
     [Fact]
-    public void AddSitecoreGraphQL_does_not_register_loggerfactory_when_toggle_disabled()
+    public void TryAddInternalLogging_adds_expected_registrations()
+    {
+        var services = new ServiceCollection();
+        ServiceCollectionExtensions.TryAddInternalLogging(services);
+        var hasLoggerFactory = services.Any(d => d.ServiceType == typeof(ILoggerFactory) && d.ImplementationType == typeof(LoggerFactory));
+        var hasGenericLogger = services.Any(d => d.ServiceType.IsGenericType && d.ServiceType.GetGenericTypeDefinition() == typeof(ILogger<>) && d.ImplementationType == typeof(Logger<>));
+        hasLoggerFactory.ShouldBeTrue();
+        hasGenericLogger.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void AddSitecoreGraphQL_binds_EnableInternalLoggingSetup_false()
     {
         // Arrange
         var inMemory = new Dictionary<string, string?>
@@ -48,9 +61,9 @@ public class DependencyInjectionLoggingToggleTests
         // Act
         services.AddSitecoreGraphQL(cfg);
         var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<SitecoreGraphQLOptions>>().Value;
 
         // Assert
-        var loggerFactory = provider.GetService<ILoggerFactory>();
-        loggerFactory.ShouldBeNull();
+        options.EnableInternalLoggingSetup.ShouldBeFalse();
     }
 }

@@ -72,7 +72,7 @@ jobs:
         continue-on-error: true
 
       - name: Pack NuGet package (${{ matrix.tfm }})
-        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=${{ matrix.tfm }} --output ./nupkgs
+        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=${{ matrix.tfm }} --no-build --no-restore --output ./nupkgs
 
       - name: Upload NuGet package artifact
         uses: actions/upload-artifact@v4

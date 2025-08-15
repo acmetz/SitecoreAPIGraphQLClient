@@ -16,6 +16,12 @@ public static class ServiceCollectionExtensions
 {
     private const string SectionName = "Sitecore:GraphQL";
 
+    internal static void TryAddInternalLogging(this IServiceCollection services)
+    {
+        services.TryAddSingleton<ILoggerFactory, LoggerFactory>();
+        services.TryAdd(ServiceDescriptor.Singleton(typeof(ILogger<>), typeof(Logger<>)));
+    }
+
     /// <summary>
     /// Registers the Sitecore GraphQL client factory, HTTP pipeline, and options.
     /// Binds configuration from the <c>Sitecore:GraphQL</c> section and validates required values.
@@ -31,6 +37,7 @@ public static class ServiceCollectionExtensions
         if (services is null) throw new ArgumentNullException(nameof(services));
         if (configuration is null) throw new ArgumentNullException(nameof(configuration));
 
+        // Bind options with validation that will be enforced on first resolution (ValidateOnStart)
         services.AddOptions<SitecoreGraphQLOptions>()
                 .Bind(configuration.GetSection(SectionName))
                 // Either defaults or at least one fully configured named client
@@ -61,13 +68,12 @@ public static class ServiceCollectionExtensions
                 .Validate(o => o.MaxUnauthorizedRetries >= 0, "MaxUnauthorizedRetries must be >= 0.")
                 .ValidateOnStart();
 
-        // Optional logging wiring (honors EnableInternalLoggingSetup)
-        var tmp = services.BuildServiceProvider();
-        var opts = tmp.GetRequiredService<IOptions<SitecoreGraphQLOptions>>().Value;
-        if (opts.EnableInternalLoggingSetup)
+        // Optional logging wiring (honors EnableInternalLoggingSetup) without building a provider or triggering validation
+        var tmpOptions = new SitecoreGraphQLOptions();
+        configuration.GetSection(SectionName).Bind(tmpOptions);
+        if (tmpOptions.EnableInternalLoggingSetup)
         {
-            services.TryAddSingleton<ILoggerFactory, LoggerFactory>();
-            services.TryAdd(ServiceDescriptor.Singleton(typeof(ILogger<>), typeof(Logger<>)));
+            services.TryAddInternalLogging();
         }
 
         services.AddSingleton<ITokenValueAccessor, DefaultTokenValueAccessor>();
