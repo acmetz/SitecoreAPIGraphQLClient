@@ -29,18 +29,17 @@ jobs:
         with:
           dotnet-version: ${{ matrix.sdk }}
 
-      - name: Restore dependencies (${{ matrix.tfm }})
-        run: dotnet restore -p:TargetFrameworks=${{ matrix.tfm }}
+      - name: Restore library (${{ matrix.tfm }})
+        run: dotnet restore src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj -p:TargetFramework=${{ matrix.tfm }}
 
-      - name: Build (${{ matrix.tfm }})
-        run: dotnet build --configuration Release --no-restore -p:TargetFrameworks=${{ matrix.tfm }}
+      - name: Build library (${{ matrix.tfm }})
+        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
 
-      - name: Test with coverage (SDK 8, target net8.0)
+      - name: Test with coverage (SDK 8)
         if: matrix.tfm == 'net8.0'
         run: >
           dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
             --configuration Release \
-            --no-build --no-restore \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
 
