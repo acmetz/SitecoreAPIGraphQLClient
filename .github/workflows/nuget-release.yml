@@ -63,12 +63,12 @@ jobs:
             -targetdir:./TestResults/CoverageReport \
             -reporttypes:Cobertura
         continue-on-error: true
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+     
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
         with:
-          name: coverage-${{ matrix.sdk }}-${{ matrix.tfm }}
-          path: ./TestResults/CoverageReport
+          files: ./TestResults/CoverageReport/Cobertura.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
         continue-on-error: true
 
       - name: Pack NuGet package (${{ matrix.tfm }})
