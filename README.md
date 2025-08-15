@@ -16,6 +16,7 @@ A .NET 8 class library that provides a DI-friendly, thread-safe factory for Grap
 - Manual token refresh API: ISitecoreGraphQLFactory.RefreshTokenAsync()
 - Options binding, validation, and DI extension for easy setup
 - Named clients support via configuration (multiple endpoints/credentials)
+- Optional internal logging setup toggle to assist authorization service logging without requiring host AddLogging
 - Unit tests using xUnit, Shouldly, and Moq
 
 ## Requirements
@@ -44,6 +45,7 @@ A .NET 8 class library that provides a DI-friendly, thread-safe factory for Grap
       "ClientSecret": "your-client-secret",
       "EnableUnauthorizedRefresh": true,
       "MaxUnauthorizedRetries": 1,
+      "EnableInternalLoggingSetup": true,
       "Clients": {
         "content": {
           "Endpoint": "https://content/graphql",
@@ -68,6 +70,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSitecoreGraphQL(builder.Configuration);
 // Also register an ISitecoreTokenService implementation provided by Sitecore API Authorization
 ```
+
+### Optional internal logging setup
+By default, AddSitecoreGraphQL will try to register minimal logging services (LoggerFactory and ILogger<T>) if the host did not already add logging, so that downstream services like the Sitecore Token Service can receive ILogger<T>. To opt out, set EnableInternalLoggingSetup to false in configuration.
 
 ## Basic usage
 ```csharp
@@ -154,6 +159,7 @@ if (!refreshed)
 - ClientSecret: OAuth client secret used to acquire tokens
 - EnableUnauthorizedRefresh: when true, refresh and retry on 401 responses
 - MaxUnauthorizedRetries: number of additional retries after the first 401 (0 disables retries)
+- EnableInternalLoggingSetup: when true (default), DI will TryAdd minimal logging so downstream services can receive ILogger<T>; set to false to opt out
 - Clients: named client map; each entry requires Endpoint (valid http/https), ClientId, ClientSecret
 
 ## API surface
@@ -176,9 +182,10 @@ if (!refreshed)
   - SitecoreGraphQLOptions
     - string? Endpoint, string? ClientId, string? ClientSecret
     - bool EnableUnauthorizedRefresh (default true), int MaxUnauthorizedRetries (default 1)
+    - bool EnableInternalLoggingSetup (default true)
     - Dictionary<string, SitecoreGraphQLClientOptions> Clients
   - Http.SitecoreTokenHandler
-    - DelegatingHandler that injects Authorization: Bearer and retries on 401 based on options
+    - DelegatingHandler that injects Authorization: Bearer and retries on 401 with exponential backoff
   - SitecoreGraphQLFactory
     - public const string NamedHttpClient = "SitecoreGraphQL"
 

@@ -39,13 +39,13 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
         var key = GetCacheKey(url, clientId);
         var lazy = _clients.GetOrAdd(key, _ =>
         {
-            _logger?.LogDebug($"Creating new GraphQL client for {url} and clientId {clientId}");
+            _logger?.LogDebug("Creating new GraphQL client for {Url} and clientId {ClientId}", url, clientId);
             return new Lazy<Task<IGraphQLClient>>(() => CreateClientInternalAsync(url));
         });
 
         if (_clients.ContainsKey(key))
         {
-            _logger?.LogTrace($"Reusing cached GraphQL client for {url} and clientId {clientId}");
+            _logger?.LogTrace("Reusing cached GraphQL client for {Url} and clientId {ClientId}", url, clientId);
         }
 
         var client = await lazy.Value;
