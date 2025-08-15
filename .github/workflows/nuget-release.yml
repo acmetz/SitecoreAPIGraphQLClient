@@ -37,9 +37,20 @@ jobs:
       - name: Build (${{ matrix.tfm }})
         run: dotnet build --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
 
-      - name: Test with coverage
+      - name: Test with coverage (SDK 8, target net8.0)
+        if: matrix.tfm == 'net8.0'
         run: >
-          dotnet test --configuration Release \
+          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
+            --configuration Release \
+            --no-build --no-restore \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - name: Test with coverage (SDK 9)
+        if: matrix.tfm == 'net9.0'
+        run: >
+          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
+            --configuration Release \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
 
