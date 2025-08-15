@@ -1,0 +1,66 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- NuGet package metadata -->
+    <PackageId>SitecoreGraphQLClient</PackageId>
+    <Title>Sitecore GraphQL Client</Title>
+    <Description>Thread-safe GraphQL client factory for Sitecore endpoints with dependency injection, HttpClient token handler, options validation, named clients, and configurable token refresh.</Description>
+    <PackageVersion>0.9.0</PackageVersion>
+    <AssemblyVersion>0.9.0.0</AssemblyVersion>
+    <FileVersion>0.9.0.0</FileVersion>
+    <InformationalVersion>0.9.0</InformationalVersion>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <IsPackable>true</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageTags>sitecore;graphql;httpclient;oauth;token;client;dotnet</PackageTags>
+    <RepositoryUrl>https://github.com/acmetz/SitecoreAPIGraphQLClient</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/acmetz/SitecoreAPIGraphQLClient</PackageProjectUrl>
+    <!-- Set a license expression if applicable; update if your repo uses a different license -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!-- Include README in NuGet (optional; enable when packing) -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- Build Configuration -->
+    <Deterministic>true</Deterministic>
+    <Features>strict</Features>
+
+    <!-- Assembly Information -->
+    <AssemblyTitle>Sitecore GraphQL Client</AssemblyTitle>
+    <AssemblyDescription>GraphQL client factory for Sitecore with token handling and DI</AssemblyDescription>
+    <AssemblyConfiguration Condition="'$(Configuration)' == 'Debug'">Debug</AssemblyConfiguration>
+    <AssemblyConfiguration Condition="'$(Configuration)' != 'Debug'">Release</AssemblyConfiguration>
+    <AssemblyCompany>Open Source</AssemblyCompany>
+    <AssemblyProduct>Sitecore.API.Foundation.GraphQL</AssemblyProduct>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Optimize>true</Optimize>
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <Optimize>false</Optimize>
+    <DebugType>full</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="GraphQL" Version="8.5.0" />
+    <PackageReference Include="GraphQL.Client" Version="6.1.0" />
+    <PackageReference Include="GraphQL.Client.Abstractions" Version="6.1.0" />
+    <PackageReference Include="GraphQL.Client.Serializer.SystemTextJson" Version="6.1.0" />
+    <PackageReference Include="SitecoreAPIAuthorization" Version="0.9.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.8" />
+  </ItemGroup>
+
+</Project>

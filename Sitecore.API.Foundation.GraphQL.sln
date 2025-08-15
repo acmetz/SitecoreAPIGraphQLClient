@@ -1,0 +1,51 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sitecore.API.Foundation.GraphQL", "src\Sitecore.API.Foundation.GraphQL\Sitecore.API.Foundation.GraphQL.csproj", "{3C55CC4E-D182-4418-9FFD-A498C9EA7CBC}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{EEC31109-80B7-4C76-9605-62EA3330D853}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{09BE3E78-EC03-42F6-B592-71FDDC541169}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "solution files", "solution files", "{5D356E60-5DE0-491F-9544-F69C60A918EF}"
+	ProjectSection(SolutionItems) = preProject
+		.gitignore = .gitignore
+		COPILOT_INSTRUCTIONS.md = COPILOT_INSTRUCTIONS.md
+		LICENSE = LICENSE
+		.github\workflows\nuget-release.yml = .github\workflows\nuget-release.yml
+		.github\workflows\pr-check.yml = .github\workflows\pr-check.yml
+		README.md = README.md
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sitecore.API.Foundation.GraphQL.Tests", "tests\Sitecore.API.Foundation.GraphQL.Tests\Sitecore.API.Foundation.GraphQL.Tests.csproj", "{3B20FE97-C53B-BAA1-6D1D-FD3896B38084}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3C55CC4E-D182-4418-9FFD-A498C9EA7CBC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C55CC4E-D182-4418-9FFD-A498C9EA7CBC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C55CC4E-D182-4418-9FFD-A498C9EA7CBC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C55CC4E-D182-4418-9FFD-A498C9EA7CBC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3B20FE97-C53B-BAA1-6D1D-FD3896B38084}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3B20FE97-C53B-BAA1-6D1D-FD3896B38084}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3B20FE97-C53B-BAA1-6D1D-FD3896B38084}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3B20FE97-C53B-BAA1-6D1D-FD3896B38084}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{3C55CC4E-D182-4418-9FFD-A498C9EA7CBC} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{3B20FE97-C53B-BAA1-6D1D-FD3896B38084} = {EEC31109-80B7-4C76-9605-62EA3330D853}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {3BE3CCC2-5905-4B49-A4EF-3EC39EE3E70A}
+	EndGlobalSection
+EndGlobal

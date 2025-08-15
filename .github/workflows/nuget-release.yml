@@ -1,0 +1,100 @@
+# CI/CD Pipeline for Sitecore.API.Foundation.GraphQL (NuGet)
+# Builds, tests (with coverage), packs, and publishes to NuGet on version tags.
+
+name: NuGet Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+
+jobs:
+  build-test:
+    name: Build and Test (SDK ${{ matrix.dotnet-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dotnet-version: [ '8.0.x', '9.0.x' ]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET ${{ matrix.dotnet-version }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.dotnet-version }}
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build solution
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test with coverage
+        run: >
+          dotnet test --configuration Release \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Convert coverage to Cobertura
+        run: |
+          ~/.dotnet/tools/reportgenerator -reports:./TestResults/**/coverage.cobertura.xml \
+            -targetdir:./TestResults/CoverageReport \
+            -reporttypes:Cobertura
+        continue-on-error: true
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.dotnet-version }}
+          path: ./TestResults/CoverageReport
+        continue-on-error: true
+
+      - name: Pack NuGet package
+        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --output ./nupkgs
+
+      - name: Upload NuGet package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkgs-${{ matrix.dotnet-version }}
+          path: ./nupkgs/*.nupkg
+
+  release:
+    name: Publish NuGet Package
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Download NuGet packages
+        uses: actions/download-artifact@v4
+        with:
+          path: ./nupkgs
+
+      - name: Publish to NuGet
+        run: |
+          for pkg in $(ls ./nupkgs/**/SitecoreAPIGraphQLClient*.nupkg); do \
+            dotnet nuget push "$pkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json; \
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: ./CHANGELOG.md
+          files: ./nupkgs/**/SitecoreAPIGraphQLClient*.nupkg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
