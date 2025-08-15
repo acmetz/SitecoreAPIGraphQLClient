@@ -12,26 +12,30 @@ on:
 
 jobs:
   build-test:
-    name: Build and Test (SDK ${{ matrix.dotnet-version }})
+    name: Build and Test (SDK ${{ matrix.sdk }} / TFM ${{ matrix.tfm }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        dotnet-version: [ '8.0.x', '9.0.x' ]
+        include:
+          - sdk: '8.0.x'
+            tfm: 'net8.0'
+          - sdk: '9.0.x'
+            tfm: 'net9.0'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup .NET ${{ matrix.dotnet-version }}
+      - name: Setup .NET ${{ matrix.sdk }}
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ matrix.dotnet-version }}
+          dotnet-version: ${{ matrix.sdk }}
 
       - name: Restore dependencies
         run: dotnet restore
 
-      - name: Build solution
-        run: dotnet build --configuration Release --no-restore
+      - name: Build (${{ matrix.tfm }})
+        run: dotnet build --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
 
       - name: Test with coverage
         run: >
@@ -52,17 +56,17 @@ jobs:
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ matrix.dotnet-version }}
+          name: coverage-${{ matrix.sdk }}-${{ matrix.tfm }}
           path: ./TestResults/CoverageReport
         continue-on-error: true
 
-      - name: Pack NuGet package
-        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --output ./nupkgs
+      - name: Pack NuGet package (${{ matrix.tfm }})
+        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=${{ matrix.tfm }} --output ./nupkgs
 
       - name: Upload NuGet package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nupkgs-${{ matrix.dotnet-version }}
+          name: nupkgs-${{ matrix.sdk }}-${{ matrix.tfm }}
           path: ./nupkgs/*.nupkg
 
   release:
@@ -86,7 +90,7 @@ jobs:
 
       - name: Publish to NuGet
         run: |
-          for pkg in $(ls ./nupkgs/**/SitecoreAPIGraphQLClient*.nupkg); do \
+          for pkg in $(ls ./nupkgs/**/SitecoreGraphQLClient*.nupkg); do \
             dotnet nuget push "$pkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json; \
           done
 
@@ -95,6 +99,6 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           body_path: ./CHANGELOG.md
-          files: ./nupkgs/**/SitecoreAPIGraphQLClient*.nupkg
+          files: ./nupkgs/**/SitecoreGraphQLClient*.nupkg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
