@@ -1,0 +1,115 @@
+# CI/CD Pipeline for Sitecore.API.Foundation.GraphQL (NuGet)
+# Builds, tests (with coverage), packs, and publishes to NuGet on version tags.
+
+name: NuGet Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+
+jobs:
+  build-test:
+    name: Build and Test (SDK ${{ matrix.sdk }} / TFM ${{ matrix.tfm }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: '8.0.x'
+            tfm: 'net8.0'
+          - sdk: '9.0.x'
+            tfm: 'net9.0'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET ${{ matrix.sdk }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.sdk }}
+
+      - name: Restore dependencies (${{ matrix.tfm }})
+        run: dotnet restore -p:TargetFramework=${{ matrix.tfm }}
+
+      - name: Build (${{ matrix.tfm }})
+        run: dotnet build --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
+
+      - name: Test with coverage (SDK 8, target net8.0)
+        if: matrix.tfm == 'net8.0'
+        run: >
+          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
+            --configuration Release \
+            --no-build --no-restore \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - name: Test with coverage (SDK 9)
+        if: matrix.tfm == 'net9.0'
+        run: >
+          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
+            --configuration Release \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Convert coverage to Cobertura
+        run: |
+          ~/.dotnet/tools/reportgenerator -reports:./TestResults/**/coverage.cobertura.xml \
+            -targetdir:./TestResults/CoverageReport \
+            -reporttypes:Cobertura
+        continue-on-error: true
+     
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./TestResults/CoverageReport/Cobertura.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+        continue-on-error: true
+
+      - name: Pack NuGet package (${{ matrix.tfm }})
+        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=${{ matrix.tfm }} --output ./nupkgs
+
+      - name: Upload NuGet package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkgs-${{ matrix.sdk }}-${{ matrix.tfm }}
+          path: ./nupkgs/*.nupkg
+
+  release:
+    name: Publish NuGet Package
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Download NuGet packages
+        uses: actions/download-artifact@v4
+        with:
+          path: ./nupkgs
+
+      - name: Publish to NuGet
+        run: |
+          for pkg in $(ls ./nupkgs/**/SitecoreGraphQLClient*.nupkg); do \
+            dotnet nuget push "$pkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json; \
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: ./CHANGELOG.md
+          files: ./nupkgs/**/SitecoreGraphQLClient*.nupkg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

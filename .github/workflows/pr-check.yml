@@ -1,0 +1,62 @@
+# PR Check Workflow for Sitecore.API.Foundation.GraphQL
+# Builds and tests the library on pull requests across .NET SDK 8 and 9.
+
+name: PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-test:
+    name: Build and Test (SDK ${{ matrix.sdk }} / TFM ${{ matrix.tfm }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: '8.0.x'
+            tfm: 'net8.0'
+          - sdk: '9.0.x'
+            tfm: 'net9.0'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET ${{ matrix.sdk }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.sdk }}
+
+      - name: Restore dependencies (${{ matrix.tfm }})
+        run: dotnet restore -p:TargetFramework=${{ matrix.tfm }}
+
+      - name: Build (${{ matrix.tfm }})
+        run: dotnet build --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
+
+      - name: Test with coverage (SDK 8, target net8.0)
+        if: matrix.tfm == 'net8.0'
+        run: >
+          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
+            --configuration Release \
+            --no-build --no-restore \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - name: Test with coverage (SDK 9)
+        if: matrix.tfm == 'net9.0'
+        run: >
+          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
+            --configuration Release \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: testresults-${{ matrix.sdk }}-${{ matrix.tfm }}
+          path: ./TestResults
+
+# End of workflow file
