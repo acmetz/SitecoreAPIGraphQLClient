@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Sitecore.API.Foundation.GraphQL.Http;
 using Sitecore.API.Foundation.GraphQL.Internal;
@@ -14,9 +16,17 @@ public static class ServiceCollectionExtensions
 {
     private const string SectionName = "Sitecore:GraphQL";
 
+    internal static void TryAddInternalLogging(this IServiceCollection services)
+    {
+        services.TryAddSingleton<ILoggerFactory, LoggerFactory>();
+        services.TryAdd(ServiceDescriptor.Singleton(typeof(ILogger<>), typeof(Logger<>)));
+    }
+
     /// <summary>
     /// Registers the Sitecore GraphQL client factory, HTTP pipeline, and options.
     /// Binds configuration from the <c>Sitecore:GraphQL</c> section and validates required values.
+    /// Also ensures optional logging infrastructure is available so downstream services like the
+    /// Sitecore Token Service can receive ILogger&lt;T&gt; if not already configured by the host.
     /// </summary>
     /// <param name="services">The DI service collection.</param>
     /// <param name="configuration">The application configuration.</param>
@@ -27,6 +37,7 @@ public static class ServiceCollectionExtensions
         if (services is null) throw new ArgumentNullException(nameof(services));
         if (configuration is null) throw new ArgumentNullException(nameof(configuration));
 
+        // Bind options with validation that will be enforced on first resolution (ValidateOnStart)
         services.AddOptions<SitecoreGraphQLOptions>()
                 .Bind(configuration.GetSection(SectionName))
                 // Either defaults or at least one fully configured named client
@@ -56,6 +67,14 @@ public static class ServiceCollectionExtensions
                           "All named clients must define Endpoint (valid http/https), ClientId, and ClientSecret.")
                 .Validate(o => o.MaxUnauthorizedRetries >= 0, "MaxUnauthorizedRetries must be >= 0.")
                 .ValidateOnStart();
+
+        // Optional logging wiring (honors EnableInternalLoggingSetup) without building a provider or triggering validation
+        var tmpOptions = new SitecoreGraphQLOptions();
+        configuration.GetSection(SectionName).Bind(tmpOptions);
+        if (tmpOptions.EnableInternalLoggingSetup)
+        {
+            services.TryAddInternalLogging();
+        }
 
         services.AddSingleton<ITokenValueAccessor, DefaultTokenValueAccessor>();
         services.AddSingleton<ISitecoreTokenCache, SitecoreTokenCache>();

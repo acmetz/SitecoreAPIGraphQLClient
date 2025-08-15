@@ -31,6 +31,13 @@ public sealed class SitecoreGraphQLOptions
     public int MaxUnauthorizedRetries { get; set; } = 1;
 
     /// <summary>
+    /// When true (default), the DI extension wires minimal logging infrastructure via TryAdd
+    /// so that downstream services (e.g., Sitecore Token Service) can receive ILogger<T> if the host
+    /// did not call AddLogging. Set to false to opt out.
+    /// </summary>
+    public bool EnableInternalLoggingSetup { get; set; } = true;
+
+    /// <summary>
     /// Optional named clients that can be created from the factory by name.
     /// </summary>
     public Dictionary<string, SitecoreGraphQLClientOptions> Clients { get; set; } = new();
