@@ -4,6 +4,8 @@ using GraphQL.Client.Serializer.SystemTextJson;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using Sitecore.API.Foundation.GraphQL.Internal;
 
 namespace Sitecore.API.Foundation.GraphQL;
 public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
@@ -92,7 +94,14 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
     {
         var httpClient = _httpClientFactory.CreateClient(NamedHttpClient);
         var options = new GraphQLHttpClientOptions { EndPoint = new Uri(url) };
-        IGraphQLClient client = new GraphQLHttpClient(options, new SystemTextJsonSerializer(), httpClient);
+
+        // Use System.Text.Json serializer with flexible GUID converters to support multiple GUID string formats
+        var jsonOptions = new JsonSerializerOptions();
+        jsonOptions.Converters.Add(new FlexibleGuidConverter());
+        jsonOptions.Converters.Add(new FlexibleNullableGuidConverter());
+        var serializer = new SystemTextJsonSerializer(jsonOptions);
+
+        IGraphQLClient client = new GraphQLHttpClient(options, serializer, httpClient);
         return Task.FromResult(client);
     }
 
