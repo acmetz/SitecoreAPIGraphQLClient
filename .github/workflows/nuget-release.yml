@@ -1,5 +1,6 @@
-# CI/CD Pipeline for Sitecore.API.Foundation.GraphQL (NuGet)
-# Builds, tests (with coverage), packs, and publishes to NuGet on version tags without a matrix.
+# CI/CD Pipeline for C# Library Distributed via NuGet
+# This workflow builds, tests, runs code coverage, packages, and publishes to NuGet.
+# It supports multi-target frameworks and follows open-source best practices.
 
 name: NuGet Release Pipeline
 
@@ -10,119 +11,117 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
   build-test:
-    name: Build and Test (.NET 8 and .NET 9)
+    name: Build and Test
     runs-on: ubuntu-latest
     steps:
+      # Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --- .NET 8 ---
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Restore library (net8.0)
-        run: dotnet restore src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj -p:TargetFramework=net8.0
-
-      - name: Build library (net8.0)
-        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --no-restore -p:TargetFramework=net8.0
-
-      - name: Restore tests (net8.0)
-        run: dotnet restore tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj -p:TargetFramework=net8.0
-
-      - name: Build tests (net8.0)
-        run: dotnet build tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj --configuration Release --no-restore -p:TargetFramework=net8.0
-
-      - name: Test with coverage (SDK 8)
-        run: >
-          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
-            --configuration Release \
-            --no-build --no-restore \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults/net8
-
-      - name: Pack NuGet package (net8.0)
-        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=net8.0 --no-restore --output ./nupkgs
-
-      # --- .NET 9 ---
-      - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '9.0.x'
-
-      - name: Restore library (net9.0)
-        run: dotnet restore src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj -p:TargetFramework=net9.0
-
-      - name: Build library (net9.0)
-        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --no-restore -p:TargetFramework=net9.0
-
-      - name: Restore tests (net8.0 under SDK 9)
-        run: dotnet restore tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj -p:TargetFramework=net8.0
-
-      - name: Build tests (net8.0 under SDK 9)
-        run: dotnet build tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj --configuration Release --no-restore -p:TargetFramework=net8.0
-
-      - name: Test with coverage (SDK 9)
-        run: >
-          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
-            --configuration Release \
-            --no-build --no-restore \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults/net9
-
-      - name: Pack NuGet package (net9.0)
-        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=net9.0 --no-restore --output ./nupkgs
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage
-          path: ./TestResults
-        continue-on-error: true
-
-      - name: Upload NuGet package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nupkgs
-          path: ./nupkgs/*.nupkg
-
-  release:
-    name: Publish NuGet Package
-    needs: build-test
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+      # Setup .NET
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
 
-      - name: Download NuGet packages
+      # Restore dependencies
+      - name: Restore dependencies
+        run: dotnet restore
+
+      # Build main library for net8.0
+      - name: Build main library (net8.0)
+        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=net8.0 --no-restore
+
+      # Build main library for net9.0
+      - name: Build main library (net9.0)
+        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=net9.0 --no-restore
+
+      # Run tests with coverage (skip Docker-related tests)
+      - name: Test with coverage (skip Docker integration)
+        run: >
+          dotnet test --configuration Release \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults 
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      # Convert coverage to cobertura format
+      - name: Convert coverage to cobertura
+        run: |
+          ~/.dotnet/tools/reportgenerator -reports:./TestResults/**/coverage.cobertura.xml \
+            -targetdir:./TestResults/CoverageReport \
+            -reporttypes:Cobertura
+        continue-on-error: true
+
+      # Upload coverage to Codecov (optional)
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./TestResults/CoverageReport/Cobertura.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+        continue-on-error: true
+
+      # Package NuGet from the project (ensure PackageId matches expected output name)
+      - name: Pack NuGet package
+        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --output ./nupkgs
+
+      # Upload build artifacts
+      - name: Upload NuGet package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkgs
+          path: ./nupkgs/SitecoreAPIGraphQLClient*.nupkg
+
+  release:
+    name: Release and Publish
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Setup .NET
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      # Download NuGet package artifact
+      - name: Download NuGet package
         uses: actions/download-artifact@v4
         with:
           name: nupkgs
           path: ./nupkgs
 
-      - name: Publish to NuGet
-        run: |
-          for pkg in $(ls ./nupkgs/*.nupkg); do \
-            dotnet nuget push "$pkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json; \
-          done
+      # Semantic versioning and changelog
+      - name: Generate changelog and version
+        uses: release-drafter/release-drafter@v6
+        with:
+          config-name: release-drafter.yml
 
+      # Publish to NuGet
+      - name: Publish to NuGet
+        run: dotnet nuget push ./nupkgs/SitecoreAPIGraphQLClient*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+
+      # Create or Update GitHub Release
       - name: Create or Update GitHub Release
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          bodyFile: ./CHANGELOG.md
-          artifacts: ./nupkgs/*.nupkg
+          bodyFile: CHANGELOG.md
+          artifacts: ./nupkgs/SitecoreAPIGraphQLClient*.nupkg
+          token: ${{ secrets.GITHUB_TOKEN }}
           allowUpdates: true
           replacesArtifacts: true
           makeLatest: true
-          token: ${{ secrets.GITHUB_TOKEN }}
