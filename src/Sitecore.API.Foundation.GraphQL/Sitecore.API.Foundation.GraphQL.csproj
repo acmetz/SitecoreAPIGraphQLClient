@@ -10,10 +10,10 @@
     <PackageId>SitecoreAPIGraphQLClient</PackageId>
     <Title>Sitecore GraphQL Client</Title>
     <Description>DI-friendly, thread-safe GraphQL client factory for Sitecore with token authentication and 401 retry support.</Description>
-    <PackageVersion>0.9.1</PackageVersion>
-    <AssemblyVersion>0.9.1.0</AssemblyVersion>
-    <FileVersion>0.9.1.0</FileVersion>
-    <InformationalVersion>0.9.1</InformationalVersion>
+    <PackageVersion>0.9.2</PackageVersion>
+    <AssemblyVersion>0.9.2.0</AssemblyVersion>
+    <FileVersion>0.9.2.0</FileVersion>
+    <InformationalVersion>0.9.2</InformationalVersion>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <IsPackable>true</IsPackable>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
