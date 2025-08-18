@@ -26,8 +26,18 @@ public class SitecoreGraphQLFactoryTests
         optionsType.ShouldNotBeNull();
         extType.ShouldNotBeNull();
 
-        var method = extType!.GetMethod("AddSitecoreGraphQL", BindingFlags.Public | BindingFlags.Static);
-        method.ShouldNotBeNull();
+        var methods = extType!.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                               .Where(m => m.Name == "AddSitecoreGraphQL").ToArray();
+        methods.Length.ShouldBeGreaterThanOrEqualTo(1);
+
+        // Verify both overloads exist
+        methods.Any(m =>
+            m.GetParameters().Select(p => p.ParameterType).SequenceEqual(new[] { typeof(IServiceCollection), typeof(IConfiguration) }))
+            .ShouldBeTrue();
+
+        methods.Any(m =>
+            m.GetParameters().Select(p => p.ParameterType).SequenceEqual(new[] { typeof(IServiceCollection), typeof(Action<SitecoreGraphQLOptions>) }))
+            .ShouldBeTrue();
     }
 
     [Fact]

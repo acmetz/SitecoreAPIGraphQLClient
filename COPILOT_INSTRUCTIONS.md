@@ -83,6 +83,12 @@ These instructions define how the coding assistant ("the agent") must operate fo
      - Enable **Microsoft.CodeAnalysis.NetAnalyzers**; consider `TreatWarningsAsErrors=true`.
      - Keep formatting consistent via `.editorconfig` committed at repo root.
 
+ 10. **Nuget Package Info**
+    - The package ID is SitecoreAPIGraphQLClient
+    - ensure the package description is clear and concise, suitable for NuGet and GitHub.
+    - ensure the README is included in the NuGet package to satisfy `PackageReadmeFile` (fixes NU5039).
+    - ensure the package has repository and project URLs set
+
    **Starter `.editorconfig` excerpt**
    ```editorconfig
    root = true
