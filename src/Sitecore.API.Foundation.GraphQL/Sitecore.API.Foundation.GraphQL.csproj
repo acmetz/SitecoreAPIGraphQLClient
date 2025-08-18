@@ -10,10 +10,10 @@
     <PackageId>SitecoreAPIGraphQLClient</PackageId>
     <Title>Sitecore GraphQL Client</Title>
     <Description>DI-friendly, thread-safe GraphQL client factory for Sitecore with token authentication and 401 retry support.</Description>
-    <PackageVersion>0.9.0</PackageVersion>
-    <AssemblyVersion>0.9.0.0</AssemblyVersion>
-    <FileVersion>0.9.0.0</FileVersion>
-    <InformationalVersion>0.9.0</InformationalVersion>
+    <PackageVersion>0.9.1</PackageVersion>
+    <AssemblyVersion>0.9.1.0</AssemblyVersion>
+    <FileVersion>0.9.1.0</FileVersion>
+    <InformationalVersion>0.9.1</InformationalVersion>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <IsPackable>true</IsPackable>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -64,5 +64,8 @@
   </ItemGroup>
 
   <!-- Ensure the README from repository root is included in the package -->
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
 
 </Project>

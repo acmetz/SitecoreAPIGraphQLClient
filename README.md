@@ -1,13 +1,13 @@
 # SitecoreAPIGraphQLClient
 
-[![NuGet](https://img.shields.io/nuget/v/SitecoreGraphQLClient.svg)](https://www.nuget.org/packages/SitecoreGraphQLClient)
-<!--[![NuGet Downloads](https://img.shields.io/nuget/dt/SitecoreGraphQLClient.svg)](https://www.nuget.org/packages/SitecoreGraphQLClient)-->
+[![NuGet](https://img.shields.io/nuget/v/SitecoreAPIGraphQLClient.svg)](https://www.nuget.org/packages/SitecoreAPIGraphQLClient)
+<!--[![NuGet Downloads](https://img.shields.io/nuget/dt/SitecoreAPIGraphQLClient.svg)](https://www.nuget.org/packages/SitecoreAPIGraphQLClient)-->
 [![PR Check](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/pr-check.yml/badge.svg?branch=main)](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/pr-check.yml)
 [![NuGet Release Pipeline](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/nuget-release.yml/badge.svg?branch=main)](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/nuget-release.yml)
 [![License](https://img.shields.io/github/license/acmetz/SitecoreAPIGraphQLClient.svg)](LICENSE)
 ![.NET](https://img.shields.io/badge/.NET-8%20%7C%209-512BD4?logo=.net&logoColor=white)
 
-A .NET 8 class library that provides a DI-friendly, thread-safe factory for GraphQL clients targeting Sitecore endpoints. It integrates with an authorization service to inject bearer tokens and supports configurable token refresh behavior.
+A .NET 8/9 class library that provides a DI-friendly, thread-safe factory for GraphQL clients targeting Sitecore endpoints. It integrates with an authorization service to inject bearer tokens and supports configurable token refresh behavior.
 
 ## Features
 - Thread-safe GraphQL client factory with per-URL and credential caching (key: url::clientId)
@@ -20,18 +20,18 @@ A .NET 8 class library that provides a DI-friendly, thread-safe factory for Grap
 - Unit tests using xUnit, Shouldly, and Moq
 
 ## Requirements
-- .NET 8 SDK/runtime
+- .NET 8 or 9 SDK/runtime
 
 ## Installation
-- NuGet package ID: SitecoreAPIGraphQLClient
+- NuGet package ID: SitecoreGraphQLClient
 - Using CLI
   ```bash
-  dotnet add package SitecoreAPIGraphQLClient
+  dotnet add package SitecoreGraphQLClient
   ```
 - Using PackageReference
   ```xml
   <ItemGroup>
-    <PackageReference Include="SitecoreAPIGraphQLClient" Version="x.y.z" />
+    <PackageReference Include="SitecoreGraphQLClient" Version="x.y.z" />
   </ItemGroup>
   ```
 
@@ -63,7 +63,10 @@ A .NET 8 class library that provides a DI-friendly, thread-safe factory for Grap
 }
 ```
 
-## Registration (Program.cs)
+## Registration
+You can register using configuration or a delegate (no IConfiguration required).
+
+- With IConfiguration (appsettings.json):
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 // Bind options and register factory + HTTP pipeline
@@ -71,8 +74,20 @@ builder.Services.AddSitecoreGraphQL(builder.Configuration);
 // Also register an ISitecoreTokenService implementation provided by Sitecore API Authorization
 ```
 
+- Without IConfiguration (delegate):
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSitecoreGraphQL(o =>
+{
+    o.Endpoint = "https://your.sitecore/graphql";
+    o.ClientId = "your-client-id";
+    o.ClientSecret = "your-client-secret";
+    o.EnableInternalLoggingSetup = true; // optional, default true
+});
+```
+
 ### Optional internal logging setup
-By default, AddSitecoreGraphQL will try to register minimal logging services (LoggerFactory and ILogger<T>) if the host did not already add logging, so that downstream services like the Sitecore Token Service can receive ILogger<T>. To opt out, set EnableInternalLoggingSetup to false in configuration.
+By default, AddSitecoreGraphQL wires minimal logging (LoggerFactory and ILogger<T>) if the host didn’t call AddLogging, so downstream services like the Sitecore Token Service can receive ILogger<T>. To opt out, set EnableInternalLoggingSetup to false.
 
 ## Basic usage
 ```csharp
@@ -83,9 +98,7 @@ public class Consumer
 
     public async Task QueryAsync(CancellationToken ct = default)
     {
-        // Uses Endpoint, ClientId, ClientSecret from configuration
         var client = await _factory.CreateClientAsync(ct);
-
         var request = new GraphQL.Client.Abstractions.GraphQLRequest
         {
             Query = "query Example { ping }"
@@ -104,25 +117,6 @@ var contentClient = await factory.CreateClientByNameAsync("content", ct);
 var searchClient  = await factory.CreateClientByNameAsync("search", ct);
 
 // contentClient and searchClient are cached independently by url::clientId
-```
-
-## Advanced: named client from sub-section configuration
-```csharp
-// You can bind a sub-section rather than full configuration, e.g. from an options object
-var graphQlSection = builder.Configuration.GetSection("Sitecore:GraphQL");
-builder.Services.AddSitecoreGraphQL(new ConfigurationBuilder().AddConfiguration(graphQlSection).Build());
-
-// Or compose programmatic options (e.g., in tests)
-services.Configure<SitecoreGraphQLOptions>(o =>
-{
-    o.Clients["analytics"] = new SitecoreGraphQLClientOptions
-    {
-        Endpoint = "https://analytics/graphql",
-        ClientId = env["ANALYTICS_ID"],
-        ClientSecret = env["ANALYTICS_SECRET"]
-    };
-});
-var analytics = await factory.CreateClientByNameAsync("analytics", ct);
 ```
 
 ## Overloads
@@ -170,44 +164,17 @@ if (!refreshed)
     - Task<IGraphQLClient> CreateClientAsync(CancellationToken ct = default)
     - Task<IGraphQLClient> CreateClientByNameAsync(string clientName, CancellationToken ct = default)
     - Task<bool> RefreshTokenAsync(CancellationToken ct = default)
-  - ITokenValueAccessor (advanced)
-    - string GetAccessToken(SitecoreAuthToken token)
-  - ISitecoreTokenCache (advanced)
-    - string? CurrentToken { get; }
-    - Task<string?> GetOrRefreshAsync(CancellationToken ct)
-    - Task<string?> ForceRefreshAsync(CancellationToken ct)
+  - ITokenValueAccessor, ISitecoreTokenCache
 - Classes
   - DependencyInjection.ServiceCollectionExtensions
     - IServiceCollection AddSitecoreGraphQL(IConfiguration configuration)
-  - SitecoreGraphQLOptions
-    - string? Endpoint, string? ClientId, string? ClientSecret
-    - bool EnableUnauthorizedRefresh (default true), int MaxUnauthorizedRetries (default 1)
-    - bool EnableInternalLoggingSetup (default true)
-    - Dictionary<string, SitecoreGraphQLClientOptions> Clients
-  - Http.SitecoreTokenHandler
-    - DelegatingHandler that injects Authorization: Bearer and retries on 401 with exponential backoff
-  - SitecoreGraphQLFactory
-    - public const string NamedHttpClient = "SitecoreGraphQL"
-
-## Testing
-- Run tests locally
-  ```bash
-  dotnet test -v minimal
-  ```
-- Generate coverage locally (example)
-  ```bash
-  dotnet test --configuration Release --collect:"XPlat Code Coverage"
-  ```
-- Stack: xUnit, Shouldly, Moq
-- Pattern: Arrange–Act–Assert
+    - IServiceCollection AddSitecoreGraphQL(Action<SitecoreGraphQLOptions> configure)
+  - SitecoreGraphQLOptions (Endpoint, ClientId, ClientSecret, EnableUnauthorizedRefresh, MaxUnauthorizedRetries, EnableInternalLoggingSetup, Clients)
+  - Http.SitecoreTokenHandler, SitecoreGraphQLFactory
 
 ## CI
-- GitHub Actions workflows build and test on .NET SDK 8 and 9
-- Coverage artifacts are uploaded from CI
-- NuGet publishing triggered on version tags (v*)
-
-## Versioning and changelog
-- See CHANGELOG.md for release notes
+- GitHub Actions workflows build and test on .NET SDK 8 and 9 and pack per TFM
+- Releases update or create a GitHub release and publish nupkgs to NuGet
 
 ## License
 - See LICENSE for terms
