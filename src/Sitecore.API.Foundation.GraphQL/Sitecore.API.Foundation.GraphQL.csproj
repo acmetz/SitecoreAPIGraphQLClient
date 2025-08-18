@@ -7,7 +7,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!-- NuGet package metadata -->
-    <PackageId>SitecoreGraphQLClient</PackageId>
+    <PackageId>SitecoreAPIGraphQLClient</PackageId>
     <Title>Sitecore GraphQL Client</Title>
     <Description>DI-friendly, thread-safe GraphQL client factory for Sitecore with token authentication and 401 retry support.</Description>
     <PackageVersion>0.9.0</PackageVersion>
