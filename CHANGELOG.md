@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.2] - 2025-08-18
+### Added
+- Tests to ensure Guid, Guid?, arrays and lists of Guid from GraphQL responses deserialize to System.Guid across formats (D, N, B, P).
+
+### Changed
+- GraphQL factory now configures System.Text.Json serializer with flexible Guid converters for robust Guid parsing.
+- Refactored FlexibleGuidConverters to reduce cyclomatic complexity and improve readability with early returns.
+
+### Fixed
+- Resolved CI pack/restore issues across SDK 8/9 and ensured README is included in packages.
+
 ## [0.9.1] - 2025-08-18
 ### Added
 - New DI registration overload: `IServiceCollection AddSitecoreGraphQL(Action<SitecoreGraphQLOptions> configure)` allowing usage without `IConfiguration`.
