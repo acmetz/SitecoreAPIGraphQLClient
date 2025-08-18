@@ -23,15 +23,15 @@ A .NET 8 class library that provides a DI-friendly, thread-safe factory for Grap
 - .NET 8 SDK/runtime
 
 ## Installation
-- NuGet package ID: SitecoreGraphQLClient
+- NuGet package ID: SitecoreAPIGraphQLClient
 - Using CLI
   ```bash
-  dotnet add package SitecoreGraphQLClient
+  dotnet add package SitecoreAPIGraphQLClient
   ```
 - Using PackageReference
   ```xml
   <ItemGroup>
-    <PackageReference Include="SitecoreGraphQLClient" Version="x.y.z" />
+    <PackageReference Include="SitecoreAPIGraphQLClient" Version="x.y.z" />
   </ItemGroup>
   ```
 
