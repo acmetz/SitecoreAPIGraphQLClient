@@ -48,41 +48,41 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
             _logger?.LogTrace("Reusing cached GraphQL client for {Url} and clientId {ClientId}", url, clientId);
         }
 
-        var client = await lazy.Value;
+        var client = await lazy.Value.ConfigureAwait(false);
         return client;
     }
 
     public async Task<IGraphQLClient> CreateClientAsync(string url, string clientId, string clientSecret)
-        => await CreateClientAsync(url, clientId, clientSecret, CancellationToken.None);
+        => await CreateClientAsync(url, clientId, clientSecret, CancellationToken.None).ConfigureAwait(false);
 
     public async Task<IGraphQLClient> CreateClientAsync(string url, CancellationToken cancellationToken = default)
     {
         var (id, secret) = GetDefaultCredentialsOrThrow(url);
-        return await CreateClientAsync(url, id, secret, cancellationToken);
+        return await CreateClientAsync(url, id, secret, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IGraphQLClient> CreateClientAsync(string url)
-        => await CreateClientAsync(url, CancellationToken.None);
+        => await CreateClientAsync(url, CancellationToken.None).ConfigureAwait(false);
 
     public async Task<IGraphQLClient> CreateClientAsync(CancellationToken cancellationToken = default)
     {
         var endpoint = GetDefaultEndpointOrThrow();
-        return await CreateClientAsync(endpoint, cancellationToken);
+        return await CreateClientAsync(endpoint, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IGraphQLClient> CreateClientAsync()
-        => await CreateClientAsync(CancellationToken.None);
+        => await CreateClientAsync(CancellationToken.None).ConfigureAwait(false);
 
     public async Task<IGraphQLClient> CreateClientByNameAsync(string clientName, CancellationToken cancellationToken = default)
     {
         ValidateRequired(clientName, nameof(clientName));
         var (url, id, secret) = GetNamedOrDefaultClientOrThrow(clientName);
-        return await CreateClientAsync(url, id, secret, cancellationToken);
+        return await CreateClientAsync(url, id, secret, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> RefreshTokenAsync(CancellationToken cancellationToken = default)
     {
-        var token = await _tokenCache.ForceRefreshAsync(cancellationToken);
+        var token = await _tokenCache.ForceRefreshAsync(cancellationToken).ConfigureAwait(false);
         var refreshed = !string.IsNullOrWhiteSpace(token);
         _logger?.LogInformation("Manual token refresh {Result}", refreshed ? "succeeded" : "failed");
         return refreshed;

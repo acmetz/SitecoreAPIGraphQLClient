@@ -37,16 +37,16 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
     /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        await EnsureTokenAsync(cancellationToken);
+        await EnsureTokenAsync(cancellationToken).ConfigureAwait(false);
         AttachAuthorizationHeaderIfPresent(request);
 
-        var response = await base.SendAsync(request, cancellationToken);
+        var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (!ShouldAttemptRefresh(response))
         {
             return response;
         }
 
-        return await RefreshAndRetryOnUnauthorizedAsync(request, response, cancellationToken);
+        return await RefreshAndRetryOnUnauthorizedAsync(request, response, cancellationToken).ConfigureAwait(false);
     }
 
     private void AttachAuthorizationHeaderIfPresent(HttpRequestMessage request)
@@ -65,11 +65,11 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
         {
             _logger?.LogDebug("401 received, attempting token refresh (attempt {Attempt}/{MaxRetries})", attempt + 1, maxRetries);
 
-            await ForceRefreshAsync(cancellationToken);
+            await ForceRefreshAsync(cancellationToken).ConfigureAwait(false);
             AttachAuthorizationHeaderIfPresent(request);
 
             response.Dispose();
-            response = await base.SendAsync(request, cancellationToken);
+            response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized)
             {
                 break;
@@ -80,7 +80,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
             {
                 var delay = ComputeBackoffDelay(attempt);
                 _logger?.LogTrace($"Unauthorized persisted. Waiting {delay}ms before next retry.");
-                await Task.Delay(delay, cancellationToken);
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
             }
         }
         return response;
@@ -98,7 +98,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
     private async Task EnsureTokenAsync(CancellationToken cancellationToken)
     {
         if (!string.IsNullOrEmpty(_cachedToken)) return;
-        await RefreshTokenInternalAsync(cancellationToken, force: false);
+        await RefreshTokenInternalAsync(cancellationToken, force: false).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
     {
         if (!force && !string.IsNullOrEmpty(_cachedToken)) return;
 
-        await _refreshLock.WaitAsync(cancellationToken);
+        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (!force && !string.IsNullOrEmpty(_cachedToken)) return;
@@ -123,7 +123,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
                 return;
             }
 
-            var token = await _tokenService.GetSitecoreAuthToken(credentials);
+            var token = await _tokenService.GetSitecoreAuthToken(credentials).ConfigureAwait(false);
             _cachedToken = _tokenAccessor.GetAccessToken(token);
         }
         finally

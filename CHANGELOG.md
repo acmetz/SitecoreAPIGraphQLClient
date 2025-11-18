@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.4]
+### Changed
+- All awaits across the library now use `.ConfigureAwait(false)` to ensure deadlock-free usage in restricted synchronization contexts.
+- CancellationToken is propagated through all async code paths, including HTTP pipeline send and 401 retry backoff delays.
+
+### Added
+- Tests to verify cooperative cancellation of in-flight requests and halting of 401 retry logic on cancellation.
+
 ## [0.9.3] - 2025-08-18
 ### Changed
 - Switched GraphQL client serializer from System.Text.Json to Newtonsoft.Json for broader compatibility.

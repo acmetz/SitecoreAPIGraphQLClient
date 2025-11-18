@@ -13,6 +13,7 @@ A .NET 8/9 class library that provides a DI-friendly, thread-safe factory for Gr
 - Thread-safe GraphQL client factory with per-URL and credential caching (key: url::clientId)
 - Token injection via HttpClient DelegatingHandler using ISitecoreTokenService
 - Configurable refresh on 401 Unauthorized (EnableUnauthorizedRefresh, MaxUnauthorizedRetries)
+- Cooperative cancellation across all async APIs and HTTP pipeline
 - Manual token refresh API: ISitecoreGraphQLFactory.RefreshTokenAsync()
 - Options binding, validation, and DI extension for easy setup
 - Named clients support via configuration (multiple endpoints/credentials)
