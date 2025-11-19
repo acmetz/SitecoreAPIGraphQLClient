@@ -16,58 +16,72 @@ permissions:
 
 jobs:
   build-test:
-    name: Build and Test
+    name: Build and Test (${{ matrix.tfm }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dotnet: '8.0.x'
+            tfm: 'net8.0'
+          - dotnet: '9.0.x'
+            tfm: 'net9.0'
+          - dotnet: '10.0.x'
+            tfm: 'net10.0'
     steps:
       # Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # Setup .NET
-      - name: Setup .NET
+      - name: Setup .NET ${{ matrix.dotnet }}
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: ${{ matrix.dotnet }}
 
-      # Restore dependencies
-      - name: Restore dependencies
+      # Restore dependencies for specific TFM
+      - name: Restore dependencies (${{ matrix.tfm }})
+        run: dotnet restore -p:TargetFramework=${{ matrix.tfm }}
+
+      # Build main library for each TFM
+      - name: Build main library (${{ matrix.tfm }})
+        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=${{ matrix.tfm }} --no-restore
+
+      # Run tests with coverage per TFM
+      - name: Test with coverage (${{ matrix.tfm }})
+        run: >
+          dotnet test --configuration Release
+          --collect:"XPlat Code Coverage"
+          --framework ${{ matrix.tfm }}
+          --results-directory ./TestResults/${{ matrix.tfm }}
+
+      - name: Upload test results (${{ matrix.tfm }})
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: testresults-${{ matrix.tfm }}
+          path: ./TestResults/${{ matrix.tfm }}
+
+  pack-and-publish:
+    name: Pack and Publish
+    needs: build-test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      # Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Setup .NET 10 for packing multi-targeted library
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Restore and pack multi-targeted library
+      - name: Restore
         run: dotnet restore
 
-      # Build main library for net8.0
-      - name: Build main library (net8.0)
-        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=net8.0 --no-restore
-
-      # Build main library for net9.0
-      - name: Build main library (net9.0)
-        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=net9.0 --no-restore
-
-      # Run tests with coverage (skip Docker-related tests)
-      - name: Test with coverage (skip Docker integration)
-        run: >
-          dotnet test --configuration Release \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults 
-
-      - name: Install ReportGenerator
-        run: dotnet tool install -g dotnet-reportgenerator-globaltool
-
-      # Convert coverage to cobertura format
-      - name: Convert coverage to cobertura
-        run: |
-          ~/.dotnet/tools/reportgenerator -reports:./TestResults/**/coverage.cobertura.xml \
-            -targetdir:./TestResults/CoverageReport \
-            -reporttypes:Cobertura
-        continue-on-error: true
-
-      # Upload coverage to Codecov (optional)
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./TestResults/CoverageReport/Cobertura.xml
-          token: ${{ secrets.CODECOV_TOKEN }}
-        continue-on-error: true
-
-      # Package NuGet from the project (ensure PackageId matches expected output name)
       - name: Pack NuGet package
         run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --output ./nupkgs
 
@@ -77,37 +91,6 @@ jobs:
         with:
           name: nupkgs
           path: ./nupkgs/SitecoreAPIGraphQLClient*.nupkg
-
-  release:
-    name: Release and Publish
-    needs: build-test
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      # Checkout code
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Setup .NET
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '9.0.x'
-
-      # Download NuGet package artifact
-      - name: Download NuGet package
-        uses: actions/download-artifact@v4
-        with:
-          name: nupkgs
-          path: ./nupkgs
-
-      # Semantic versioning and changelog
-      - name: Generate changelog and version
-        uses: release-drafter/release-drafter@v6
-        with:
-          config-name: release-drafter.yml
 
       # Publish to NuGet
       - name: Publish to NuGet
