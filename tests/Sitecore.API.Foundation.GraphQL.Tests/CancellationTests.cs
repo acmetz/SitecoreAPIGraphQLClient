@@ -14,10 +14,13 @@ public class CancellationTests
     private sealed class CancellableSpyHandler : HttpMessageHandler
     {
         public int Calls { get; private set; }
+        private readonly TaskCompletionSource _startedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Started => _startedTcs.Task;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
+            _startedTcs.TrySetResult();
             // Simulate long running request that respects cancellation
             await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.OK);
@@ -56,10 +59,15 @@ public class CancellationTests
         };
 
         var client = new HttpClient(handler);
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        using var cts = new CancellationTokenSource();
+
+        // Start request and wait until inner handler actually begins processing, then cancel
+        var sendTask = client.GetAsync("http://unit.test", cts.Token);
+        await inner.Started.WaitAsync(TimeSpan.FromSeconds(2));
+        cts.Cancel();
 
         // Act/Assert
-        await Should.ThrowAsync<TaskCanceledException>(async () => await client.GetAsync("http://unit.test", cts.Token));
+        await Should.ThrowAsync<TaskCanceledException>(async () => await sendTask);
         inner.Calls.ShouldBe(1);
     }
 
