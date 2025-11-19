@@ -1,5 +1,5 @@
 # PR Check Workflow for Sitecore.API.Foundation.GraphQL
-# Builds and tests the library on pull requests across .NET SDK 8 and 9 without a matrix.
+# Builds and tests the library on pull requests across .NET SDK 8, 9, and 10 using a matrix.
 
 name: PR Check
 
@@ -10,69 +10,53 @@ on:
 
 jobs:
   build-test:
-    name: Build and Test (.NET 8 and .NET 9)
+    name: Build and Test (${{ matrix.tfm }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dotnet: '8.0.x'
+            tfm: 'net8.0'
+          - dotnet: '9.0.x'
+            tfm: 'net9.0'
+          - dotnet: '10.0.x'
+            tfm: 'net10.0'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --- .NET 8 ---
-      - name: Setup .NET 8
+      - name: Setup .NET ${{ matrix.dotnet }}
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: ${{ matrix.dotnet }}
 
-      - name: Restore library (net8.0)
-        run: dotnet restore src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj -p:TargetFrameworks=net8.0
+      - name: Restore library (${{ matrix.tfm }})
+        run: dotnet restore src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj -p:TargetFramework=${{ matrix.tfm }}
 
-      - name: Build library (net8.0)
-        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --no-restore -p:TargetFrameworks=net8.0
+      - name: Build library (${{ matrix.tfm }})
+        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
 
-      - name: Restore tests (net8.0)
-        run: dotnet restore tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj -p:TargetFramework=net8.0
+      - name: Restore tests (${{ matrix.tfm }})
+        run: dotnet restore tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj -p:TargetFramework=${{ matrix.tfm }}
 
-      - name: Build tests (net8.0)
-        run: dotnet build tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj --configuration Release --no-restore -p:TargetFramework=net8.0
+      - name: Build tests (${{ matrix.tfm }})
+        run: dotnet build tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
 
-      - name: Test with coverage (SDK 8)
+      - name: Test with coverage (${{ matrix.tfm }})
         run: >
-          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
-            --configuration Release \
-            --no-build --no-restore \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults/net8
+          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj
+          --configuration Release
+          --no-build --no-restore
+          --framework ${{ matrix.tfm }}
+          --collect:"XPlat Code Coverage"
+          --results-directory ./TestResults/${{ matrix.tfm }}
 
-      # --- .NET 9 ---
-      - name: Setup .NET 9
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '9.0.x'
-
-      - name: Restore library (net9.0)
-        run: dotnet restore src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj -p:TargetFrameworks=net9.0
-
-      - name: Build library (net9.0)
-        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --no-restore -p:TargetFrameworks=net9.0
-
-      - name: Restore tests (net8.0 under SDK 9)
-        run: dotnet restore tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj -p:TargetFramework=net8.0
-
-      - name: Build tests (net8.0 under SDK 9)
-        run: dotnet build tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj --configuration Release --no-restore -p:TargetFramework=net8.0
-
-      - name: Test with coverage (SDK 9)
-        run: >
-          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
-            --configuration Release \
-            --no-build --no-restore \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults/net9
-
-      - name: Upload test results
+      - name: Upload test results (${{ matrix.tfm }})
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: testresults
-          path: ./TestResults
+          name: testresults-${{ matrix.tfm }}
+          path: ./TestResults/${{ matrix.tfm }}
 
 # End of workflow file

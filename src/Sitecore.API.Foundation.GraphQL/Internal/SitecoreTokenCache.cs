@@ -32,7 +32,7 @@ internal sealed class SitecoreTokenCache : ISitecoreTokenCache
     public async Task<string?> GetOrRefreshAsync(CancellationToken cancellationToken)
     {
         if (!string.IsNullOrEmpty(_token)) return _token;
-        return await RefreshCoreAsync(cancellationToken);
+        return await RefreshCoreAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public Task<string?> ForceRefreshAsync(CancellationToken cancellationToken)
@@ -40,7 +40,7 @@ internal sealed class SitecoreTokenCache : ISitecoreTokenCache
 
     private async Task<string?> RefreshCoreAsync(CancellationToken cancellationToken)
     {
-        await _lock.WaitAsync(cancellationToken);
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (!string.IsNullOrEmpty(_token)) return _token;
@@ -52,7 +52,7 @@ internal sealed class SitecoreTokenCache : ISitecoreTokenCache
                 return _token;
             }
 
-            var token = await _tokenService.GetSitecoreAuthToken(credentials);
+            var token = await _tokenService.GetSitecoreAuthToken(credentials).ConfigureAwait(false);
             _token = _accessor.GetAccessToken(token);
             return _token;
         }
