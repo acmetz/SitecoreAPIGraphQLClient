@@ -123,5 +123,13 @@ public static class ServiceCollectionExtensions
     }
 
     private static bool IsValidHttpUrl(string value)
-        => Uri.TryCreate(value, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps);
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var u))
+            return false;
+
+        if (u.Scheme == Uri.UriSchemeHttps)
+            return true;
+
+        return u.Scheme == Uri.UriSchemeHttp && u.IsLoopback;
+    }
 }

@@ -40,7 +40,7 @@ public class GuidDeserializationTests
         // Minimal options via delegate
         services.AddSitecoreGraphQL(o =>
         {
-            o.Endpoint = "http://unit.test/graphql";
+            o.Endpoint = "https://unit.test/graphql";
             o.ClientId = "id";
             o.ClientSecret = "secret";
             o.EnableUnauthorizedRefresh = false; // keep handler behavior minimal
