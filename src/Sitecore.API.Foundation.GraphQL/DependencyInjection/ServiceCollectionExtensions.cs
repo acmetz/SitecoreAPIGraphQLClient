@@ -114,10 +114,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITokenValueAccessor, DefaultTokenValueAccessor>();
         services.AddSingleton<ISitecoreTokenCache, SitecoreTokenCache>();
 
-        services.AddHttpClient(SitecoreGraphQLFactory.NamedHttpClient)
-                .AddHttpMessageHandler<SitecoreTokenHandler>();
-
-        services.AddTransient<SitecoreTokenHandler>();
+        services.AddHttpClient(SitecoreGraphQLFactory.NamedHttpClient);
         services.AddSingleton<ISitecoreGraphQLFactory, SitecoreGraphQLFactory>();
         return services;
     }

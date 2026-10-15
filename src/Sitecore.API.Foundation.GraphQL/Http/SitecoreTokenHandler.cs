@@ -14,6 +14,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
     private readonly ISitecoreTokenService _tokenService;
     private readonly IOptions<SitecoreGraphQLOptions> _options;
     private readonly ITokenValueAccessor _tokenAccessor;
+    private readonly SitecoreAuthClientCredentials? _credentials;
     private readonly ILogger<SitecoreTokenHandler>? _logger;
 
     private volatile string? _cachedToken;
@@ -26,11 +27,13 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
         ISitecoreTokenService tokenService,
         IOptions<SitecoreGraphQLOptions> options,
         ITokenValueAccessor tokenAccessor,
+        SitecoreAuthClientCredentials? credentials = null,
         ILogger<SitecoreTokenHandler>? logger = null)
     {
         _tokenService = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _tokenAccessor = tokenAccessor ?? throw new ArgumentNullException(nameof(tokenAccessor));
+        _credentials = credentials;
         _logger = logger;
     }
 
@@ -134,6 +137,12 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
 
     private bool TryBuildCredentials(out SitecoreAuthClientCredentials credentials)
     {
+        if (_credentials.HasValue)
+        {
+            credentials = _credentials.Value;
+            return true;
+        }
+
         var opts = _options.Value;
         if (!string.IsNullOrWhiteSpace(opts.ClientId) && !string.IsNullOrWhiteSpace(opts.ClientSecret))
         {
