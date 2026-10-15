@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Sitecore.API.Foundation.Authorization.Abstractions;
 using Sitecore.API.Foundation.Authorization.Models;
+using Sitecore.API.Foundation.GraphQL.Internal;
 
 namespace Sitecore.API.Foundation.GraphQL.Http;
 
@@ -119,7 +120,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
         {
             if (!force && !string.IsNullOrEmpty(_cachedToken)) return;
 
-            if (!TryBuildCredentials(out var credentials))
+            if (!_options.Value.TryBuildCredentials(out var credentials))
             {
                 _logger?.LogWarning("Sitecore GraphQL options missing ClientId/ClientSecret; token cannot be acquired.");
                 _cachedToken = null;
@@ -134,6 +135,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
             _refreshLock.Release();
         }
     }
+<<<<<<< HEAD
 
     private bool TryBuildCredentials(out SitecoreAuthClientCredentials credentials)
     {
@@ -152,4 +154,6 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
         credentials = default;
         return false;
     }
+=======
+>>>>>>> origin/main
 }
