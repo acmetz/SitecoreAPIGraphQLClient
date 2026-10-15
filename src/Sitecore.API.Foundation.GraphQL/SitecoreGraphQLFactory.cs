@@ -10,7 +10,6 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
 {
     private readonly ConcurrentDictionary<string, Lazy<Task<IGraphQLClient>>> _clients = new();
     private readonly IOptions<SitecoreGraphQLOptions> _options;
-    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<SitecoreGraphQLFactory>? _logger;
     private readonly ISitecoreTokenCache _tokenCache;
     private readonly Authorization.Abstractions.ISitecoreTokenService _tokenService;
@@ -23,7 +22,6 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
     public SitecoreGraphQLFactory(
         Authorization.Abstractions.ISitecoreTokenService tokenService,
         IOptions<SitecoreGraphQLOptions> options,
-        IHttpClientFactory httpClientFactory,
         ISitecoreTokenCache tokenCache,
         System.Net.Http.IHttpMessageHandlerFactory httpMessageHandlerFactory,
         ITokenValueAccessor tokenAccessor,
@@ -32,7 +30,6 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
     {
         _tokenService = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _tokenCache = tokenCache ?? throw new ArgumentNullException(nameof(tokenCache));
         _httpMessageHandlerFactory = httpMessageHandlerFactory ?? throw new ArgumentNullException(nameof(httpMessageHandlerFactory));
         _tokenAccessor = tokenAccessor ?? throw new ArgumentNullException(nameof(tokenAccessor));
