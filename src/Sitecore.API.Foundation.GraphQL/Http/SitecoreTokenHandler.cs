@@ -15,9 +15,13 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
     private readonly IOptions<SitecoreGraphQLOptions> _options;
     private readonly ITokenValueAccessor _tokenAccessor;
     private readonly ILogger<SitecoreTokenHandler>? _logger;
+    private readonly string _clientId;
+    private readonly string _clientSecret;
 
     private volatile string? _cachedToken;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
+
+    /// <summary>
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SitecoreTokenHandler"/> class.
@@ -26,11 +30,19 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
         ISitecoreTokenService tokenService,
         IOptions<SitecoreGraphQLOptions> options,
         ITokenValueAccessor tokenAccessor,
+        string clientId,
+        string clientSecret,
         ILogger<SitecoreTokenHandler>? logger = null)
     {
         _tokenService = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _tokenAccessor = tokenAccessor ?? throw new ArgumentNullException(nameof(tokenAccessor));
+
+        if (string.IsNullOrWhiteSpace(clientId)) throw new ArgumentException("Value cannot be null or whitespace.", nameof(clientId));
+        if (string.IsNullOrWhiteSpace(clientSecret)) throw new ArgumentException("Value cannot be null or whitespace.", nameof(clientSecret));
+
+        _clientId = clientId;
+        _clientSecret = clientSecret;
         _logger = logger;
     }
 
@@ -116,13 +128,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
         {
             if (!force && !string.IsNullOrEmpty(_cachedToken)) return;
 
-            if (!TryBuildCredentials(out var credentials))
-            {
-                _logger?.LogWarning("Sitecore GraphQL options missing ClientId/ClientSecret; token cannot be acquired.");
-                _cachedToken = null;
-                return;
-            }
-
+            var credentials = new SitecoreAuthClientCredentials(_clientId, _clientSecret);
             var token = await _tokenService.GetSitecoreAuthToken(credentials).ConfigureAwait(false);
             _cachedToken = _tokenAccessor.GetAccessToken(token);
         }
@@ -132,15 +138,5 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
         }
     }
 
-    private bool TryBuildCredentials(out SitecoreAuthClientCredentials credentials)
-    {
-        var opts = _options.Value;
-        if (!string.IsNullOrWhiteSpace(opts.ClientId) && !string.IsNullOrWhiteSpace(opts.ClientSecret))
-        {
-            credentials = new SitecoreAuthClientCredentials(opts.ClientId, opts.ClientSecret);
-            return true;
-        }
-        credentials = default;
-        return false;
-    }
+
 }
