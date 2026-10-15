@@ -244,6 +244,7 @@ public class SitecoreGraphQLFactoryTests
         services.AddHttpClient();
         services.AddSingleton(tokenServiceMock.Object);
         services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.AddSingleton<ITokenValueAccessor>(Mock.Of<ITokenValueAccessor>());
         services.Configure<SitecoreGraphQLOptions>(o =>
         {
             o.Endpoint = string.Empty;
