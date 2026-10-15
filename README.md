@@ -179,3 +179,24 @@ if (!refreshed)
 
 ## License
 - See LICENSE for terms
+
+## Performance Benchmarks
+We use BenchmarkDotNet to measure performance.
+
+The benchmark projects are included in the repository and are run automatically in the CI pipeline after every push and pull request. Check the GitHub Actions run summary for detailed benchmark results.
+
+```markdown
+BenchmarkDotNet v0.15.8, Linux Ubuntu 24.04.4 LTS (Noble Numbat)
+Intel Xeon Processor 2.30GHz, 1 CPU, 4 logical and 4 physical cores
+.NET SDK 10.0.103
+  [Host] : .NET 10.0.3 (10.0.3, 10.0.326.7603), X64 RyuJIT x86-64-v3
+
+Job=ShortRun  Toolchain=InProcessEmitToolchain  IterationCount=3
+LaunchCount=1  WarmupCount=3
+
+| Method                                  | Mean       | Error        | StdDev      | Gen0   | Gen1   | Allocated |
+|---------------------------------------- |-----------:|-------------:|------------:|-------:|-------:|----------:|
+| CreateClientAsync_Default               | 5,166.7 ns | 27,740.58 ns | 1,520.55 ns | 0.0305 | 0.0153 |     784 B |
+| CreateClientAsync_Cached                | 9,167.3 ns | 24,008.67 ns | 1,316.00 ns | 0.0610 | 0.0305 |    1568 B |
+| CreateClientAsync_WithUrlAndCredentials |   170.0 ns |     20.03 ns |     1.10 ns | 0.0098 |      - |     232 B |
+```

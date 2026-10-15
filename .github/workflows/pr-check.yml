@@ -59,4 +59,26 @@ jobs:
           name: testresults-${{ matrix.tfm }}
           path: ./TestResults/${{ matrix.tfm }}
 
+  run-benchmarks:
+    name: Run Benchmarks
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build benchmarks
+        run: dotnet build benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks.csproj -c Release -f net8.0
+
+      - name: Run benchmarks
+        run: cd benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks && dotnet run -c Release -f net8.0
+
+      - name: Output Benchmark Results to Summary
+        run: cat benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks/BenchmarkDotNet.Artifacts/results/Sitecore.API.Foundation.GraphQL.Benchmarks.SitecoreGraphQLFactoryBenchmarks-report-github.md >> $GITHUB_STEP_SUMMARY
+
 # End of workflow file

@@ -55,3 +55,7 @@ nunit-*.xml
 
 #visual Studio
 .vs/
+
+BenchmarkDotNet.Artifacts/
+run.log
+run_fast.log
