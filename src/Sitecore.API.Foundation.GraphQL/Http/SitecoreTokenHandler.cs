@@ -126,14 +126,16 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
             }
 
             var token = await _tokenService.GetSitecoreAuthToken(credentials).ConfigureAwait(false);
-            _cachedToken = _tokenAccessor.GetAccessToken(token);
-            if (!string.IsNullOrEmpty(_cachedToken))
+            var accessToken = _tokenAccessor.GetAccessToken(token);
+            if (!string.IsNullOrEmpty(accessToken))
             {
-                _cachedAuthHeader = new AuthenticationHeaderValue("Bearer", _cachedToken);
+                _cachedAuthHeader = new AuthenticationHeaderValue("Bearer", accessToken);
+                _cachedToken = accessToken;
             }
             else
             {
                 _cachedAuthHeader = null;
+                _cachedToken = null;
             }
         }
         finally
