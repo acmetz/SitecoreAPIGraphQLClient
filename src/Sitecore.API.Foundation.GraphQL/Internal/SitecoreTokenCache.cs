@@ -32,18 +32,18 @@ internal sealed class SitecoreTokenCache : ISitecoreTokenCache
     public async Task<string?> GetOrRefreshAsync(CancellationToken cancellationToken)
     {
         if (!string.IsNullOrEmpty(_token)) return _token;
-        return await RefreshCoreAsync(cancellationToken).ConfigureAwait(false);
+        return await RefreshCoreAsync(false, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<string?> ForceRefreshAsync(CancellationToken cancellationToken)
-        => RefreshCoreAsync(cancellationToken);
+        => RefreshCoreAsync(true, cancellationToken);
 
-    private async Task<string?> RefreshCoreAsync(CancellationToken cancellationToken)
+    private async Task<string?> RefreshCoreAsync(bool force, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!string.IsNullOrEmpty(_token)) return _token;
+            if (!force && !string.IsNullOrEmpty(_token)) return _token;
 
             if (!_options.Value.TryBuildCredentials(out var credentials))
             {
