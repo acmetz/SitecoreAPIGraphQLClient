@@ -58,14 +58,14 @@ public class SitecoreGraphQLFactoryTests
         var factory = provider.GetRequiredService<ISitecoreGraphQLFactory>();
 
         // Act
-        // Use reflection to call CreateClientAsync(string url, string clientId, string clientSecret)
-        var method = factory.GetType().GetMethod("CreateClientAsync", new[] { typeof(string), typeof(string), typeof(string) });
+        // Use reflection to call CreateClientAsync(string url, string clientId, string clientSecret, CancellationToken)
+        var method = factory.GetType().GetMethod("CreateClientAsync", new[] { typeof(string), typeof(string), typeof(string), typeof(CancellationToken) });
         method.ShouldNotBeNull();
 
         var tasks = new Task<IGraphQLClient>[10];
         for (var i = 0; i < tasks.Length; i++)
         {
-            tasks[i] = (Task<IGraphQLClient>)method!.Invoke(factory, new object[] { "https://example/graphql", "id", "secret" })!;
+            tasks[i] = (Task<IGraphQLClient>)method!.Invoke(factory, new object[] { "https://example/graphql", "id", "secret", CancellationToken.None })!;
         }
 
         var results = await Task.WhenAll(tasks);
