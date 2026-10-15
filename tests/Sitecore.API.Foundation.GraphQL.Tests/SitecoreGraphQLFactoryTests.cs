@@ -285,4 +285,29 @@ public class SitecoreGraphQLFactoryTests
         var ex = await Should.ThrowAsync<ArgumentException>(() => factory.CreateClientAsync("https://example/graphql", "clientId", invalidClientSecret!));
         ex.ParamName.ShouldBe("clientSecret");
     }
+
+    [Fact]
+    public async Task CreateClient_parameterless_throws_when_endpoint_unconfigured()
+    {
+        // Arrange
+        var tokenServiceMock = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
+
+        var services = new ServiceCollection();
+        services.AddHttpClient();
+        services.AddSingleton(tokenServiceMock.Object);
+        services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.Configure<SitecoreGraphQLOptions>(o =>
+        {
+            o.Endpoint = string.Empty;
+            o.ClientId = "cfg-id";
+            o.ClientSecret = "cfg-secret";
+        });
+        services.AddSingleton<ISitecoreGraphQLFactory, SitecoreGraphQLFactory>();
+
+        var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<ISitecoreGraphQLFactory>();
+        // Act & Assert
+        await Should.ThrowAsync<InvalidOperationException>(async () => await factory.CreateClientAsync());
+       await Should.ThrowAsync<InvalidOperationException>(async () => await factory.CreateClientAsync());
+   }
 }
