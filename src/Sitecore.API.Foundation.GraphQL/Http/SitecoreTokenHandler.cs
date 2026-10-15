@@ -17,6 +17,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
     private readonly ILogger<SitecoreTokenHandler>? _logger;
 
     private volatile string? _cachedToken;
+    private volatile AuthenticationHeaderValue? _cachedAuthHeader;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
     /// <summary>
@@ -51,8 +52,8 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
 
     private void AttachAuthorizationHeaderIfPresent(HttpRequestMessage request)
     {
-        if (string.IsNullOrEmpty(_cachedToken)) return;
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _cachedToken);
+        if (_cachedAuthHeader is null) return;
+        request.Headers.Authorization = _cachedAuthHeader;
     }
 
     private bool ShouldAttemptRefresh(HttpResponseMessage response)
@@ -120,11 +121,20 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
             {
                 _logger?.LogWarning("Sitecore GraphQL options missing ClientId/ClientSecret; token cannot be acquired.");
                 _cachedToken = null;
+                _cachedAuthHeader = null;
                 return;
             }
 
             var token = await _tokenService.GetSitecoreAuthToken(credentials).ConfigureAwait(false);
             _cachedToken = _tokenAccessor.GetAccessToken(token);
+            if (!string.IsNullOrEmpty(_cachedToken))
+            {
+                _cachedAuthHeader = new AuthenticationHeaderValue("Bearer", _cachedToken);
+            }
+            else
+            {
+                _cachedAuthHeader = null;
+            }
         }
         finally
         {
