@@ -106,11 +106,11 @@ public class DependencyInjectionOverloadTests
         });
 
         var provider = services.BuildServiceProvider();
-        var optsObj = provider.GetService(typeof(Microsoft.Extensions.Options.IOptions<>).MakeGenericType(Type.GetType("Sitecore.API.Foundation.GraphQL.SitecoreGraphQLOptions, Sitecore.API.Foundation.GraphQL")!));
+        var options = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SitecoreGraphQLOptions>>();
 
         if (isValid)
         {
-            optsObj.ShouldNotBeNull();
+            options.Value.ShouldNotBeNull();
             var factory = provider.GetService<ISitecoreGraphQLFactory>();
             factory.ShouldNotBeNull();
         }
@@ -118,8 +118,7 @@ public class DependencyInjectionOverloadTests
         {
             try
             {
-                var opts = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SitecoreGraphQLOptions>>();
-                var value = opts.Value;
+                _ = options.Value;
                 Assert.Fail("Expected an OptionsValidationException to be thrown.");
             }
             catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is Microsoft.Extensions.Options.OptionsValidationException optEx)
