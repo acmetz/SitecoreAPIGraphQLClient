@@ -52,26 +52,17 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
         return client;
     }
 
-    public async Task<IGraphQLClient> CreateClientAsync(string url, string clientId, string clientSecret)
-        => await CreateClientAsync(url, clientId, clientSecret, CancellationToken.None).ConfigureAwait(false);
-
     public async Task<IGraphQLClient> CreateClientAsync(string url, CancellationToken cancellationToken = default)
     {
         var (id, secret) = GetDefaultCredentialsOrThrow(url);
         return await CreateClientAsync(url, id, secret, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<IGraphQLClient> CreateClientAsync(string url)
-        => await CreateClientAsync(url, CancellationToken.None).ConfigureAwait(false);
-
     public async Task<IGraphQLClient> CreateClientAsync(CancellationToken cancellationToken = default)
     {
         var endpoint = GetDefaultEndpointOrThrow();
         return await CreateClientAsync(endpoint, cancellationToken).ConfigureAwait(false);
     }
-
-    public async Task<IGraphQLClient> CreateClientAsync()
-        => await CreateClientAsync(CancellationToken.None).ConfigureAwait(false);
 
     public async Task<IGraphQLClient> CreateClientByNameAsync(string clientName, CancellationToken cancellationToken = default)
     {
