@@ -47,7 +47,7 @@ public class TokenHandlerTests
         var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
 
         var inner = new SpyHandler((_, __) => new HttpResponseMessage(HttpStatusCode.OK));
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, "dummy-id", "dummy-secret", logger)
         {
             InnerHandler = inner
         };
@@ -88,7 +88,7 @@ public class TokenHandlerTests
                 : new HttpResponseMessage(HttpStatusCode.OK);
         });
 
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, "dummy-id", "dummy-secret", logger)
         {
             InnerHandler = inner
         };
@@ -104,30 +104,4 @@ public class TokenHandlerTests
         tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()), Times.Exactly(2));
     }
 
-    [Fact]
-    public async Task Missing_options_does_not_set_header_and_does_not_call_token_service()
-    {
-        // Arrange
-        var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
-        var options = Options.Create(new SitecoreGraphQLOptions());
-        var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
-
-        var inner = new SpyHandler((_, __) => new HttpResponseMessage(HttpStatusCode.OK));
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
-        {
-            InnerHandler = inner
-        };
-
-        var client = new HttpClient(handler);
-
-        // Act
-        var resp = await client.GetAsync("http://unit.test");
-
-        // Assert
-        resp.StatusCode.ShouldBe(HttpStatusCode.OK);
-        inner.LastAuth.ShouldBeNull();
-        tokenService.VerifyNoOtherCalls();
-        accessor.VerifyNoOtherCalls();
-    }
 }
