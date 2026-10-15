@@ -11,26 +11,20 @@ namespace Sitecore.API.Foundation.GraphQL.Http;
 /// </summary>
 public sealed class SitecoreTokenHandler : DelegatingHandler
 {
-    private readonly ISitecoreTokenService _tokenService;
+    private readonly ISitecoreTokenCache _tokenCache;
     private readonly IOptions<SitecoreGraphQLOptions> _options;
-    private readonly ITokenValueAccessor _tokenAccessor;
     private readonly ILogger<SitecoreTokenHandler>? _logger;
-
-    private volatile string? _cachedToken;
-    private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SitecoreTokenHandler"/> class.
     /// </summary>
     public SitecoreTokenHandler(
-        ISitecoreTokenService tokenService,
+        ISitecoreTokenCache tokenCache,
         IOptions<SitecoreGraphQLOptions> options,
-        ITokenValueAccessor tokenAccessor,
         ILogger<SitecoreTokenHandler>? logger = null)
     {
-        _tokenService = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
+        _tokenCache = tokenCache ?? throw new ArgumentNullException(nameof(tokenCache));
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _tokenAccessor = tokenAccessor ?? throw new ArgumentNullException(nameof(tokenAccessor));
         _logger = logger;
     }
 
@@ -51,8 +45,9 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
 
     private void AttachAuthorizationHeaderIfPresent(HttpRequestMessage request)
     {
-        if (string.IsNullOrEmpty(_cachedToken)) return;
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _cachedToken);
+        var token = _tokenCache.CurrentToken;
+        if (string.IsNullOrEmpty(token)) return;
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
 
     private bool ShouldAttemptRefresh(HttpResponseMessage response)
@@ -95,52 +90,12 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
         return TimeSpan.FromMilliseconds(ms);
     }
 
-    private async Task EnsureTokenAsync(CancellationToken cancellationToken)
-    {
-        if (!string.IsNullOrEmpty(_cachedToken)) return;
-        await RefreshTokenInternalAsync(cancellationToken, force: false).ConfigureAwait(false);
-    }
+    private Task EnsureTokenAsync(CancellationToken cancellationToken)
+        => _tokenCache.GetOrRefreshAsync(cancellationToken);
 
     /// <summary>
     /// Forces token refresh.
     /// </summary>
     public Task ForceRefreshAsync(CancellationToken cancellationToken)
-        => RefreshTokenInternalAsync(cancellationToken, force: true);
-
-    private async Task RefreshTokenInternalAsync(CancellationToken cancellationToken, bool force)
-    {
-        if (!force && !string.IsNullOrEmpty(_cachedToken)) return;
-
-        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (!force && !string.IsNullOrEmpty(_cachedToken)) return;
-
-            if (!TryBuildCredentials(out var credentials))
-            {
-                _logger?.LogWarning("Sitecore GraphQL options missing ClientId/ClientSecret; token cannot be acquired.");
-                _cachedToken = null;
-                return;
-            }
-
-            var token = await _tokenService.GetSitecoreAuthToken(credentials).ConfigureAwait(false);
-            _cachedToken = _tokenAccessor.GetAccessToken(token);
-        }
-        finally
-        {
-            _refreshLock.Release();
-        }
-    }
-
-    private bool TryBuildCredentials(out SitecoreAuthClientCredentials credentials)
-    {
-        var opts = _options.Value;
-        if (!string.IsNullOrWhiteSpace(opts.ClientId) && !string.IsNullOrWhiteSpace(opts.ClientSecret))
-        {
-            credentials = new SitecoreAuthClientCredentials(opts.ClientId, opts.ClientSecret);
-            return true;
-        }
-        credentials = default;
-        return false;
-    }
+        => _tokenCache.ForceRefreshAsync(cancellationToken);
 }

@@ -42,18 +42,16 @@ public class CancellationTests
     public async Task CancellationToken_cancels_inflight_request()
     {
         // Arrange
-        var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
-                    .ReturnsAsync(default(SitecoreAuthToken));
-
-        var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
-        accessor.Setup(a => a.GetAccessToken(It.IsAny<SitecoreAuthToken>())).Returns("t");
+        var tokenCache = new Mock<ISitecoreTokenCache>(MockBehavior.Strict);
+        tokenCache.Setup(c => c.GetOrRefreshAsync(It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("t");
+        tokenCache.SetupGet(c => c.CurrentToken).Returns("t");
 
         var options = Options.Create(new SitecoreGraphQLOptions { ClientId = "id", ClientSecret = "secret", EnableUnauthorizedRefresh = true, MaxUnauthorizedRetries = 3 });
         var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
 
         var inner = new CancellableSpyHandler();
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenCache.Object, options, logger)
         {
             InnerHandler = inner
         };
@@ -75,21 +73,23 @@ public class CancellationTests
     public async Task CancellationToken_cancels_retry_backoff_and_stops_further_retries()
     {
         // Arrange
-        var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
-                    .ReturnsAsync(default(SitecoreAuthToken));
+        var tokenCache = new Mock<ISitecoreTokenCache>(MockBehavior.Strict);
+        tokenCache.Setup(c => c.GetOrRefreshAsync(It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("t1");
 
-        var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
-        accessor.SetupSequence(a => a.GetAccessToken(It.IsAny<SitecoreAuthToken>()))
-                .Returns("t1")
-                .Returns("t2")
-                .Returns("t3");
+        tokenCache.SetupSequence(c => c.CurrentToken)
+                  .Returns("t1") // Attempt 1 attach
+                  .Returns("t2") // Attempt 2 attach
+                  .Returns("t3"); // Attempt 3 attach (won't be called due to cancel)
+
+        tokenCache.Setup(c => c.ForceRefreshAsync(It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("t2");
 
         var options = Options.Create(new SitecoreGraphQLOptions { ClientId = "id", ClientSecret = "secret", EnableUnauthorizedRefresh = true, MaxUnauthorizedRetries = 5 });
         var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
 
         var inner = new AlwaysUnauthorizedHandler();
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenCache.Object, options, logger)
         {
             InnerHandler = inner
         };
