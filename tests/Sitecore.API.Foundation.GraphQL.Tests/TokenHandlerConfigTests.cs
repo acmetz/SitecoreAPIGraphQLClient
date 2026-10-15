@@ -47,7 +47,7 @@ public class TokenHandlerConfigTests
         var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
 
         var inner = new SpyHandler((_, __) => new HttpResponseMessage(HttpStatusCode.Unauthorized));
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, credentials: null, logger: logger)
         {
             InnerHandler = inner
         };
@@ -87,7 +87,7 @@ public class TokenHandlerConfigTests
                 : new HttpResponseMessage(HttpStatusCode.OK);
         });
 
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, credentials: null, logger: logger)
         {
             InnerHandler = inner
         };

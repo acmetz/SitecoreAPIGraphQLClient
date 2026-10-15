@@ -53,7 +53,7 @@ public class CancellationTests
         var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
 
         var inner = new CancellableSpyHandler();
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, credentials: null, logger: logger)
         {
             InnerHandler = inner
         };
@@ -89,7 +89,7 @@ public class CancellationTests
         var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
 
         var inner = new AlwaysUnauthorizedHandler();
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, credentials: null, logger: logger)
         {
             InnerHandler = inner
         };
