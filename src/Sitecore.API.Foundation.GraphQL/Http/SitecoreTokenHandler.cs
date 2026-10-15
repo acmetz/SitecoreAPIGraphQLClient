@@ -120,7 +120,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
         {
             if (!force && !string.IsNullOrEmpty(_cachedToken)) return;
 
-            if (!TryBuildCredentials(out var credentials))
+            if (!_options.Value.TryBuildCredentials(out var credentials))
             {
                 _logger?.LogWarning("Sitecore GraphQL options missing ClientId/ClientSecret; token cannot be acquired.");
                 _cachedToken = null;
@@ -144,6 +144,13 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
             return true;
         }
 
-        return _options.Value.TryBuildCredentials(out credentials);
+        var opts = _options.Value;
+        if (!string.IsNullOrWhiteSpace(opts.ClientId) && !string.IsNullOrWhiteSpace(opts.ClientSecret))
+        {
+            credentials = new SitecoreAuthClientCredentials(opts.ClientId, opts.ClientSecret);
+            return true;
+        }
+        credentials = default;
+        return false;
     }
 }

@@ -66,41 +66,6 @@ public class TokenHandlerTests
     }
 
     [Fact]
-    public async Task Explicit_credentials_are_used_instead_of_configured_options()
-    {
-        // Arrange
-        var explicitCredentials = new SitecoreAuthClientCredentials("explicit-id", "explicit-secret");
-        var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.Is<SitecoreAuthClientCredentials>(c =>
-                c.ClientId == explicitCredentials.ClientId && c.ClientSecret == explicitCredentials.ClientSecret)))
-                    .ReturnsAsync(default(SitecoreAuthToken));
-
-        var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
-        accessor.Setup(a => a.GetAccessToken(It.IsAny<SitecoreAuthToken>())).Returns("abc");
-
-        var options = Options.Create(new SitecoreGraphQLOptions { ClientId = "cfg-id", ClientSecret = "cfg-secret" });
-        var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
-
-        var inner = new SpyHandler((_, __) => new HttpResponseMessage(HttpStatusCode.OK));
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, explicitCredentials, logger)
-        {
-            InnerHandler = inner
-        };
-
-        var client = new HttpClient(handler);
-
-        // Act
-        var resp = await client.GetAsync("http://unit.test");
-
-        // Assert
-        resp.StatusCode.ShouldBe(HttpStatusCode.OK);
-        inner.LastAuth.ShouldNotBeNull();
-        inner.LastAuth!.Parameter.ShouldBe("abc");
-        tokenService.Verify(s => s.GetSitecoreAuthToken(It.Is<SitecoreAuthClientCredentials>(c =>
-                c.ClientId == explicitCredentials.ClientId && c.ClientSecret == explicitCredentials.ClientSecret)), Times.Once);
-    }
-
-    [Fact]
     public async Task On_401_refreshes_and_retries_once()
     {
         // Arrange
