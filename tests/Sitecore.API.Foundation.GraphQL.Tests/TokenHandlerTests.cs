@@ -36,18 +36,17 @@ public class TokenHandlerTests
     public async Task Adds_bearer_header_from_access_token()
     {
         // Arrange
-        var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
-                    .ReturnsAsync(default(SitecoreAuthToken));
-
-        var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
-        accessor.Setup(a => a.GetAccessToken(It.IsAny<SitecoreAuthToken>())).Returns("abc");
+        var tokenCache = new Mock<ISitecoreTokenCache>(MockBehavior.Strict);
+        tokenCache.Setup(c => c.GetOrRefreshAsync(It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("abc");
+        tokenCache.SetupGet(c => c.CurrentToken)
+                  .Returns("abc");
 
         var options = Options.Create(new SitecoreGraphQLOptions { ClientId = "id", ClientSecret = "secret" });
         var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
 
         var inner = new SpyHandler((_, __) => new HttpResponseMessage(HttpStatusCode.OK));
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenCache.Object, options, logger)
         {
             InnerHandler = inner
         };
@@ -62,21 +61,23 @@ public class TokenHandlerTests
         inner.LastAuth.ShouldNotBeNull();
         inner.LastAuth!.Scheme.ShouldBe("Bearer");
         inner.LastAuth!.Parameter.ShouldBe("abc");
-        tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()), Times.Once);
+        tokenCache.Verify(c => c.GetOrRefreshAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task On_401_refreshes_and_retries_once()
     {
         // Arrange
-        var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
-                    .ReturnsAsync(default(SitecoreAuthToken));
+        var tokenCache = new Mock<ISitecoreTokenCache>(MockBehavior.Strict);
+        tokenCache.Setup(c => c.GetOrRefreshAsync(It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("t1");
 
-        var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
-        accessor.SetupSequence(a => a.GetAccessToken(It.IsAny<SitecoreAuthToken>()))
-                .Returns("t1")
-                .Returns("t2");
+        tokenCache.SetupSequence(c => c.CurrentToken)
+                  .Returns("t1") // Attempt 1 attach
+                  .Returns("t2"); // Attempt 2 attach
+
+        tokenCache.Setup(c => c.ForceRefreshAsync(It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("t2");
 
         var options = Options.Create(new SitecoreGraphQLOptions { ClientId = "id", ClientSecret = "secret" });
         var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
@@ -88,7 +89,7 @@ public class TokenHandlerTests
                 : new HttpResponseMessage(HttpStatusCode.OK);
         });
 
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenCache.Object, options, logger)
         {
             InnerHandler = inner
         };
@@ -101,20 +102,24 @@ public class TokenHandlerTests
         // Assert
         resp.StatusCode.ShouldBe(HttpStatusCode.OK);
         inner.Calls.ShouldBe(2);
-        tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()), Times.Exactly(2));
+        tokenCache.Verify(c => c.ForceRefreshAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task Missing_options_does_not_set_header_and_does_not_call_token_service()
+    public async Task Missing_token_does_not_set_header()
     {
         // Arrange
-        var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
+        var tokenCache = new Mock<ISitecoreTokenCache>(MockBehavior.Strict);
+        tokenCache.Setup(c => c.GetOrRefreshAsync(It.IsAny<CancellationToken>()))
+                  .ReturnsAsync((string?)null);
+        tokenCache.SetupGet(c => c.CurrentToken)
+                  .Returns((string?)null);
+
         var options = Options.Create(new SitecoreGraphQLOptions());
         var logger = Mock.Of<ILogger<SitecoreTokenHandler>>();
 
         var inner = new SpyHandler((_, __) => new HttpResponseMessage(HttpStatusCode.OK));
-        var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object, logger)
+        var handler = new SitecoreTokenHandler(tokenCache.Object, options, logger)
         {
             InnerHandler = inner
         };
@@ -127,7 +132,8 @@ public class TokenHandlerTests
         // Assert
         resp.StatusCode.ShouldBe(HttpStatusCode.OK);
         inner.LastAuth.ShouldBeNull();
-        tokenService.VerifyNoOtherCalls();
-        accessor.VerifyNoOtherCalls();
+        tokenCache.Verify(c => c.GetOrRefreshAsync(It.IsAny<CancellationToken>()), Times.Once);
+        tokenCache.VerifyGet(c => c.CurrentToken, Times.Once);
+        tokenCache.VerifyNoOtherCalls();
     }
 }
