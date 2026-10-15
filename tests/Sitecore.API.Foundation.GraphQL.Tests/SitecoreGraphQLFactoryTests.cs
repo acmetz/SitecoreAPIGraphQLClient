@@ -228,4 +228,61 @@ public class SitecoreGraphQLFactoryTests
         // Assert
         client.ShouldNotBeNull();
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateClientAsync_with_invalid_url_throws_argument_exception(string? invalidUrl)
+    {
+        // Arrange
+        var tokenServiceMock = new Mock<ISitecoreTokenService>();
+        var optionsMock = new Mock<IOptions<SitecoreGraphQLOptions>>();
+        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        var tokenCacheMock = new Mock<ISitecoreTokenCache>();
+
+        var factory = new SitecoreGraphQLFactory(tokenServiceMock.Object, optionsMock.Object, httpClientFactoryMock.Object, tokenCacheMock.Object);
+
+        // Act & Assert
+        var ex = await Should.ThrowAsync<ArgumentException>(() => factory.CreateClientAsync(invalidUrl!, "clientId", "clientSecret"));
+        ex.ParamName.ShouldBe("url");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateClientAsync_with_invalid_clientId_throws_argument_exception(string? invalidClientId)
+    {
+        // Arrange
+        var tokenServiceMock = new Mock<ISitecoreTokenService>();
+        var optionsMock = new Mock<IOptions<SitecoreGraphQLOptions>>();
+        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        var tokenCacheMock = new Mock<ISitecoreTokenCache>();
+
+        var factory = new SitecoreGraphQLFactory(tokenServiceMock.Object, optionsMock.Object, httpClientFactoryMock.Object, tokenCacheMock.Object);
+
+        // Act & Assert
+        var ex = await Should.ThrowAsync<ArgumentException>(() => factory.CreateClientAsync("https://example/graphql", invalidClientId!, "clientSecret"));
+        ex.ParamName.ShouldBe("clientId");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateClientAsync_with_invalid_clientSecret_throws_argument_exception(string? invalidClientSecret)
+    {
+        // Arrange
+        var tokenServiceMock = new Mock<ISitecoreTokenService>();
+        var optionsMock = new Mock<IOptions<SitecoreGraphQLOptions>>();
+        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        var tokenCacheMock = new Mock<ISitecoreTokenCache>();
+
+        var factory = new SitecoreGraphQLFactory(tokenServiceMock.Object, optionsMock.Object, httpClientFactoryMock.Object, tokenCacheMock.Object);
+
+        // Act & Assert
+        var ex = await Should.ThrowAsync<ArgumentException>(() => factory.CreateClientAsync("https://example/graphql", "clientId", invalidClientSecret!));
+        ex.ParamName.ShouldBe("clientSecret");
+    }
 }
