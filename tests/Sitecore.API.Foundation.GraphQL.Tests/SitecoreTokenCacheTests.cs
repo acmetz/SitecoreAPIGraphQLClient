@@ -44,7 +44,7 @@ public class SitecoreTokenCacheTests
     }
 
     [Fact]
-    public async Task GetOrRefreshAsync_WithValidCredentials_RetrievesAndCachesToken()
+    public async Task GetOrRefreshAsync_with_valid_credentials_retrieves_and_caches_token()
     {
         var cache = CreateCache();
         var fakeTokenResponse = new SitecoreAuthToken();
