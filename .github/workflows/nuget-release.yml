@@ -12,7 +12,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-test:
@@ -32,6 +32,8 @@ jobs:
       # Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # Setup .NET
       - name: Setup .NET ${{ matrix.dotnet }}
@@ -39,18 +41,26 @@ jobs:
         with:
           dotnet-version: ${{ matrix.dotnet }}
 
-      # Restore dependencies for specific TFM
-      - name: Restore dependencies (${{ matrix.tfm }})
-        run: dotnet restore -p:TargetFramework=${{ matrix.tfm }}
+      # Restore and build main library for specific TFM
+      - name: Restore library (${{ matrix.tfm }})
+        run: dotnet restore src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj -p:TargetFramework=${{ matrix.tfm }}
 
-      # Build main library for each TFM
       - name: Build main library (${{ matrix.tfm }})
         run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release -p:TargetFramework=${{ matrix.tfm }} --no-restore
+
+      # Restore and build tests for specific TFM
+      - name: Restore tests (${{ matrix.tfm }})
+        run: dotnet restore tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj -p:TargetFramework=${{ matrix.tfm }}
+
+      - name: Build tests (${{ matrix.tfm }})
+        run: dotnet build tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj --configuration Release -p:TargetFramework=${{ matrix.tfm }} --no-restore
 
       # Run tests with coverage per TFM
       - name: Test with coverage (${{ matrix.tfm }})
         run: >
-          dotnet test --configuration Release
+          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj
+          --configuration Release
+          --no-build --no-restore
           --collect:"XPlat Code Coverage"
           --framework ${{ matrix.tfm }}
           --results-directory ./TestResults/${{ matrix.tfm }}
@@ -67,23 +77,54 @@ jobs:
     needs: build-test
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    environment: nuget
+    permissions:
+      contents: write
+      id-token: write
     steps:
+      # Fail fast if NUGET_USER environment variable is missing
+      - name: Validate NuGet OIDC configuration
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          if [ -z "$NUGET_USER" ]; then
+            echo "::error::Environment variable NUGET_USER is not set. Configure NUGET_USER in the 'nuget' GitHub Environment settings."
+            exit 1
+          fi
+
       # Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      # Setup .NET 10 for packing multi-targeted library
-      - name: Setup .NET 10
+      # Verify git tag matches PackageVersion in .csproj
+      - name: Verify tag matches PackageVersion
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          TAG_VERSION="${REF_NAME#v}"
+          CSPROJ_VERSION=$(sed -n 's:.*<PackageVersion>\(.*\)</PackageVersion>.*:\1:p' src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj | tr -d '[:space:]')
+          if [ "$TAG_VERSION" != "$CSPROJ_VERSION" ]; then
+            echo "::error::Git tag version ($TAG_VERSION) does not match .csproj PackageVersion ($CSPROJ_VERSION)."
+            exit 1
+          fi
+
+      # Setup .NET SDKs for packing multi-targeted library
+      - name: Setup .NET SDKs
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
 
       # Restore and pack multi-targeted library
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj
 
       - name: Pack NuGet package
-        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --output ./nupkgs
+        run: dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true --output ./nupkgs
 
       # Upload build artifacts
       - name: Upload NuGet package
@@ -92,9 +133,18 @@ jobs:
           name: nupkgs
           path: ./nupkgs/SitecoreAPIGraphQLClient*.nupkg
 
+      # Authenticate with NuGet via OIDC Trusted Publishing
+      - name: NuGet Login (OIDC)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       # Publish to NuGet
       - name: Publish to NuGet
-        run: dotnet nuget push ./nupkgs/SitecoreAPIGraphQLClient*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push ./nupkgs/SitecoreAPIGraphQLClient*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       # Create or Update GitHub Release
       - name: Create or Update GitHub Release

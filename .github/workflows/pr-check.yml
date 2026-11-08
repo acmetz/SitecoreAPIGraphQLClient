@@ -8,6 +8,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   build-test:
     name: Build and Test (${{ matrix.tfm }})
@@ -25,6 +28,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup .NET ${{ matrix.dotnet }}
         uses: actions/setup-dotnet@v4
