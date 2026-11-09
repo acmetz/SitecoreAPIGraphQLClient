@@ -5,9 +5,9 @@
 [![PR Check](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/pr-check.yml/badge.svg?branch=main)](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/pr-check.yml)
 [![NuGet Release Pipeline](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/nuget-release.yml/badge.svg?branch=main)](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/nuget-release.yml)
 [![License](https://img.shields.io/github/license/acmetz/SitecoreAPIGraphQLClient.svg)](LICENSE)
-![.NET](https://img.shields.io/badge/.NET-8%20%7C%209-512BD4?logo=.net&logoColor=white)
+![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-512BD4?logo=.net&logoColor=white)
 
-A .NET 8/9 class library that provides a DI-friendly, thread-safe factory for GraphQL clients targeting Sitecore endpoints. It integrates with an authorization service to inject bearer tokens and supports configurable token refresh behavior.
+A .NET 8/9/10 class library that provides a DI-friendly, thread-safe factory for GraphQL clients targeting Sitecore endpoints. It integrates with an authorization service to inject bearer tokens and supports configurable token refresh behavior.
 
 ## Features
 - Thread-safe GraphQL client factory with per-URL and credential caching (key: url::clientId)
@@ -21,7 +21,7 @@ A .NET 8/9 class library that provides a DI-friendly, thread-safe factory for Gr
 - Unit tests using xUnit, Shouldly, and Moq
 
 ## Requirements
-- .NET 8 or 9 SDK/runtime
+- .NET 8, 9, or 10 SDK/runtime
 
 ## Installation
 - NuGet package ID: SitecoreAPIGraphQLClient
@@ -88,7 +88,7 @@ builder.Services.AddSitecoreGraphQL(o =>
 ```
 
 ### Optional internal logging setup
-By default, AddSitecoreGraphQL wires minimal logging (LoggerFactory and ILogger<T>) if the host didn’t call AddLogging, so downstream services like the Sitecore Token Service can receive ILogger<T>. To opt out, set EnableInternalLoggingSetup to false.
+By default, AddSitecoreGraphQL wires minimal logging (LoggerFactory and ILogger<T>) if the host didn't call AddLogging, so downstream services like the Sitecore Token Service can receive ILogger<T>. To opt out, set EnableInternalLoggingSetup to false.
 
 ## Basic usage
 ```csharp
@@ -174,8 +174,8 @@ if (!refreshed)
   - Http.SitecoreTokenHandler, SitecoreGraphQLFactory
 
 ## CI
-- GitHub Actions workflows build and test on .NET SDK 8 and 9 and pack per TFM
-- Releases update or create a GitHub release and publish nupkgs to NuGet
+- GitHub Actions workflows build and test on .NET SDK 8, 9, and 10 and pack all targeted frameworks
+- Releases update or create a GitHub release and publish nupkgs to NuGet via OIDC Trusted Publishing (`NuGet/login@v1` in the `nuget` GitHub Environment)
 
 ## License
 - See LICENSE for terms
