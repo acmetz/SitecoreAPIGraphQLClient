@@ -117,6 +117,12 @@ internal static class EndpointUriValidator
             return false;
         }
 
+        if (!IsValidParsedHost(uri))
+        {
+            errorMessage = $"Endpoint '{SanitizeForLogging(rawEndpoint)}' has an invalid host name or IP address.";
+            return false;
+        }
+
         if (uri.Scheme == Uri.UriSchemeHttp && !uri.IsLoopback && !allowInsecureHttp)
         {
             errorMessage = $"Endpoint '{SanitizeForLogging(rawEndpoint)}' uses cleartext HTTP on a non-loopback host. Use HTTPS or set AllowInsecureHttp = true.";
@@ -125,6 +131,41 @@ internal static class EndpointUriValidator
 
         normalizedEndpoint = uri.GetComponents(UriComponents.SchemeAndServer | UriComponents.PathAndQuery, UriFormat.UriEscaped);
         errorMessage = string.Empty;
+        return true;
+    }
+
+    private static bool IsValidParsedHost(Uri uri)
+    {
+        var host = uri.DnsSafeHost;
+        if (string.IsNullOrWhiteSpace(host) ||
+            Uri.CheckHostName(host) == UriHostNameType.Unknown ||
+            host[0] == '-' ||
+            host[^1] == '-' ||
+            host.Contains(".-", StringComparison.Ordinal) ||
+            host.Contains("-.", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // System.Uri falls back to UriHostNameType.Dns when an all-numeric IPv4 literal has out-of-range octets (e.g. 999.999.999.999).
+        if (uri.HostNameType == UriHostNameType.Dns)
+        {
+            var hasNonDigitOrDot = false;
+            foreach (var ch in host)
+            {
+                if ((ch < '0' || ch > '9') && ch != '.')
+                {
+                    hasNonDigitOrDot = true;
+                    break;
+                }
+            }
+
+            if (!hasNonDigitOrDot)
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -214,21 +255,52 @@ internal static class EndpointUriValidator
 
         var authorityEnd = HttpsPrefix.Length + slashIndex;
         var host = span[HttpsPrefix.Length..authorityEnd];
-        if (host[0] == '.' || host[^1] == '.')
+        if (host.Length > 253 || host[0] == '.' || host[^1] == '.')
         {
             return false;
         }
 
-        var prevDot = false;
+        var labelLength = 0;
+        var labelStartChar = '\0';
+        var prevChar = '.';
         foreach (var ch in host)
         {
-            var isValidHostChar = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '.';
-            if (!isValidHostChar || (ch == '.' && prevDot))
+            if (ch == '.')
+            {
+                if (labelLength is 0 or > 63 || prevChar == '-')
+                {
+                    return false;
+                }
+
+                labelLength = 0;
+                prevChar = '.';
+                continue;
+            }
+
+            var isValidHostChar = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-';
+            if (!isValidHostChar)
             {
                 return false;
             }
 
-            prevDot = ch == '.';
+            if (labelLength == 0)
+            {
+                if (ch == '-')
+                {
+                    return false;
+                }
+
+                labelStartChar = ch;
+            }
+
+            labelLength++;
+            prevChar = ch;
+        }
+
+        // Defer IPv4 literals (valid or out-of-range octets like 999.999.999.999) and invalid labels to System.Uri.
+        if (labelLength is 0 or > 63 || prevChar == '-' || labelStartChar is < 'a' or > 'z')
+        {
+            return false;
         }
 
         var pathAndQuery = span[authorityEnd..];

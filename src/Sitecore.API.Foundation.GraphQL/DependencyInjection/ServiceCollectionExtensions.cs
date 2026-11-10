@@ -214,6 +214,7 @@ public static class ServiceCollectionExtensions
         {
             var optionsMonitor = sp.GetRequiredService<IOptionsMonitor<SitecoreGraphQLOptions>>();
             var knownDynamicPartitions = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+            var partitionGate = new object();
 
             return request =>
             {
@@ -227,12 +228,18 @@ public static class ServiceCollectionExtensions
                 if (ctx.IsExplicitClient && !knownDynamicPartitions.ContainsKey(partitionKey))
                 {
                     var maxDynamicPartitions = Math.Max(1, optionsMonitor.CurrentValue.MaxCachedClients);
-                    if (knownDynamicPartitions.Count >= maxDynamicPartitions)
+                    lock (partitionGate)
                     {
-                        return $"{authority}|explicit:shared";
-                    }
+                        if (!knownDynamicPartitions.ContainsKey(partitionKey))
+                        {
+                            if (knownDynamicPartitions.Count >= maxDynamicPartitions)
+                            {
+                                return $"{authority}|explicit:shared";
+                            }
 
-                    knownDynamicPartitions.TryAdd(partitionKey, 0);
+                            knownDynamicPartitions.TryAdd(partitionKey, 0);
+                        }
+                    }
                 }
 
                 return $"{authority}|{partitionKey}";

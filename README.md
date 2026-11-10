@@ -176,18 +176,18 @@ Apple M1 Max, 1 CPU, 10 logical and 10 physical cores
 
 | Method | Runtime | Mean | Error | StdDev | Gen0 | Gen1 | Allocated |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `CreateClientAsync` (Explicit Cache Hit) | .NET 8.0 | 188.7 ns | 0.78 ns | 0.69 ns | 0.0114 | - | 72 B |
-| `CreateClientAsync` (Explicit Cache Hit) | .NET 9.0 | 190.4 ns | 0.36 ns | 0.33 ns | 0.0114 | - | 72 B |
-| `CreateClientAsync` (Explicit Cache Hit) | .NET 10.0 | 176.1 ns | 0.53 ns | 0.47 ns | 0.0114 | - | 72 B |
-| `CreateClientByNameAsync` (Named Cache Hit) | .NET 8.0 | 205.0 ns | 0.55 ns | 0.48 ns | 0.0114 | - | 72 B |
-| `CreateClientByNameAsync` (Named Cache Hit) | .NET 9.0 | 224.4 ns | 0.70 ns | 0.65 ns | 0.0114 | - | 72 B |
-| `CreateClientByNameAsync` (Named Cache Hit) | .NET 10.0 | 201.0 ns | 0.43 ns | 0.40 ns | 0.0114 | - | 72 B |
-| `SitecoreTokenHandler.SendAsync` (200 OK POST) | .NET 8.0 | 663.7 ns | 3.78 ns | 3.53 ns | 0.3824 | 0.0019 | 2,400 B |
-| `SitecoreTokenHandler.SendAsync` (200 OK POST) | .NET 9.0 | 608.8 ns | 1.87 ns | 1.66 ns | 0.3614 | 0.0010 | 2,272 B |
-| `SitecoreTokenHandler.SendAsync` (200 OK POST) | .NET 10.0 | 512.9 ns | 1.31 ns | 1.09 ns | 0.3595 | 0.0010 | 2,256 B |
-| `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 8.0 | 1,972.4 ns | 5.49 ns | 4.86 ns | 0.9079 | - | 5,712 B |
-| `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 9.0 | 1,943.0 ns | 7.90 ns | 7.00 ns | 0.9155 | 0.0076 | 5,744 B |
-| `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 10.0 | 1,655.3 ns | 4.01 ns | 3.55 ns | 0.9022 | 0.0076 | 5,664 B |
+| `CreateClientAsync` (Explicit Cache Hit) | .NET 8.0 | 184.9 ns | 0.53 ns | 0.49 ns | 0.0114 | - | 72 B |
+| `CreateClientAsync` (Explicit Cache Hit) | .NET 9.0 | 184.1 ns | 0.33 ns | 0.31 ns | 0.0114 | - | 72 B |
+| `CreateClientAsync` (Explicit Cache Hit) | .NET 10.0 | 173.5 ns | 0.55 ns | 0.49 ns | 0.0114 | - | 72 B |
+| `CreateClientByNameAsync` (Named Cache Hit) | .NET 8.0 | 201.1 ns | 0.62 ns | 0.55 ns | 0.0114 | - | 72 B |
+| `CreateClientByNameAsync` (Named Cache Hit) | .NET 9.0 | 231.3 ns | 0.62 ns | 0.58 ns | 0.0114 | - | 72 B |
+| `CreateClientByNameAsync` (Named Cache Hit) | .NET 10.0 | 196.7 ns | 0.46 ns | 0.43 ns | 0.0114 | - | 72 B |
+| `SitecoreTokenHandler.SendAsync` (200 OK POST) | .NET 8.0 | 666.7 ns | 2.30 ns | 2.16 ns | 0.3824 | 0.0019 | 2,400 B |
+| `SitecoreTokenHandler.SendAsync` (200 OK POST) | .NET 9.0 | 617.7 ns | 2.27 ns | 2.13 ns | 0.3614 | 0.0010 | 2,272 B |
+| `SitecoreTokenHandler.SendAsync` (200 OK POST) | .NET 10.0 | 533.4 ns | 1.71 ns | 1.34 ns | 0.3595 | 0.0010 | 2,256 B |
+| `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 8.0 | 1,724.6 ns | 4.20 ns | 3.93 ns | 0.8793 | 0.0057 | 5,520 B |
+| `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 9.0 | 1,771.4 ns | 5.64 ns | 5.00 ns | 0.8888 | 0.0076 | 5,584 B |
+| `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 10.0 | 1,562.0 ns | 6.04 ns | 5.04 ns | 0.8774 | 0.0076 | 5,504 B |
 
 Run the benchmark suite locally:
 

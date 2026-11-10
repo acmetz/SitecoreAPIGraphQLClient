@@ -209,6 +209,7 @@ public class TokenHandlerTests
 
     private sealed class AsyncBodySpyHandler : HttpMessageHandler
     {
+        private readonly HashSet<HttpRequestMessage> _seenRequests = new(ReferenceEqualityComparer.Instance);
         private readonly Func<HttpRequestMessage, int, Task<HttpResponseMessage>> _onSend;
         private int _calls;
 
@@ -216,6 +217,16 @@ public class TokenHandlerTests
             => _onSend = onSend;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => _onSend(request, Interlocked.Increment(ref _calls));
+        {
+            lock (_seenRequests)
+            {
+                if (!_seenRequests.Add(request))
+                {
+                    throw new InvalidOperationException("The request message was already sent.");
+                }
+            }
+
+            return _onSend(request, Interlocked.Increment(ref _calls));
+        }
     }
 }

@@ -27,6 +27,7 @@ internal sealed class CredentialForwardingHandler : HttpMessageHandler
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var originalContent = request.Content;
         var forwardedRequest = CreateForwardedRequest(request, _credentialContext);
         try
         {
@@ -37,8 +38,12 @@ internal sealed class CredentialForwardingHandler : HttpMessageHandler
         }
         finally
         {
-            // Detach caller-owned content before disposing the shallow forwarding envelope.
-            forwardedRequest.Content = null;
+            if (ReferenceEquals(forwardedRequest.Content, originalContent))
+            {
+                // Detach caller-owned content before disposing the shallow forwarding envelope.
+                forwardedRequest.Content = null;
+            }
+
             forwardedRequest.Dispose();
         }
     }

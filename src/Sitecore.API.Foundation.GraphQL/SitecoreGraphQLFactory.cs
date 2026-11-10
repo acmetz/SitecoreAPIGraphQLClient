@@ -18,7 +18,7 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
     private readonly record struct CachedClientEntry(IGraphQLClient Client, Task<IGraphQLClient> CompletedTask);
 
     private readonly ConcurrentDictionary<ClientCacheKey, Lazy<CachedClientEntry>> _clients = new();
-    private readonly Queue<ClientCacheKey> _dynamicEvictionQueue = new();
+    private readonly Queue<(ClientCacheKey Key, Lazy<CachedClientEntry> Entry)> _dynamicEvictionQueue = new();
     private readonly object _evictionLock = new();
 
     private readonly ISitecoreTokenCoordinator _coordinator;
@@ -438,22 +438,26 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
 
         if (!isConfiguredClient)
         {
-            TrackAndEvictDynamicClients(key, Math.Max(1, maxCachedClients));
+            TrackAndEvictDynamicClients(key, winningLazy, Math.Max(1, maxCachedClients));
         }
 
         return winningLazy.Value.CompletedTask;
     }
 
-    private void TrackAndEvictDynamicClients(ClientCacheKey addedKey, int maxCachedClients)
+    private void TrackAndEvictDynamicClients(
+        ClientCacheKey addedKey,
+        Lazy<CachedClientEntry> addedEntry,
+        int maxCachedClients)
     {
         lock (_evictionLock)
         {
-            _dynamicEvictionQueue.Enqueue(addedKey);
+            _dynamicEvictionQueue.Enqueue((addedKey, addedEntry));
 
-            while (_clients.Count > maxCachedClients && _dynamicEvictionQueue.Count > 0)
+            while (_dynamicEvictionQueue.Count > maxCachedClients)
             {
-                var oldestKey = _dynamicEvictionQueue.Dequeue();
-                if (_clients.TryRemove(oldestKey, out _))
+                var (oldestKey, oldestEntry) = _dynamicEvictionQueue.Dequeue();
+                if (((ICollection<KeyValuePair<ClientCacheKey, Lazy<CachedClientEntry>>>)_clients)
+                    .Remove(new KeyValuePair<ClientCacheKey, Lazy<CachedClientEntry>>(oldestKey, oldestEntry)))
                 {
                     // Intentionally do not Dispose() the evicted socket-free wrapper so in-flight callers never hit ObjectDisposedException.
                     SitecoreGraphQLDiagnostics.ClientCacheEvictions.Add(1);

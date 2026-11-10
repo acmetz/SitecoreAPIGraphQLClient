@@ -13,14 +13,16 @@ internal interface ISitecoreTokenCoordinator
     Task<(SitecoreAuthToken AuthToken, string AccessToken)> GetTokenAsync(
         SitecoreAuthClientCredentials credentials,
         string? clientName,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        bool isExplicitClient = false);
 
     Task<(SitecoreAuthToken AuthToken, string AccessToken)> RefreshTokenAsync(
         SitecoreAuthClientCredentials credentials,
         SitecoreAuthToken? failedAuthToken,
         string? failedAccessToken,
         string? clientName,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        bool isExplicitClient = false);
 }
 
 internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
@@ -55,11 +57,12 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
     public async Task<(SitecoreAuthToken AuthToken, string AccessToken)> GetTokenAsync(
         SitecoreAuthClientCredentials credentials,
         string? clientName,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool isExplicitClient = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var clientTag = SitecoreGraphQLDiagnostics.GetClientTag(clientName);
+        var clientTag = SitecoreGraphQLDiagnostics.GetClientTag(clientName, isExplicitClient);
         SitecoreGraphQLDiagnostics.TokenRequests.Add(1, new KeyValuePair<string, object?>("client.name", clientTag));
 
         using var activity = SitecoreGraphQLDiagnostics.ActivitySource.StartActivity("SitecoreGraphQL.GetToken");
@@ -85,7 +88,8 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         SitecoreAuthToken? failedAuthToken,
         string? failedAccessToken,
         string? clientName,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool isExplicitClient = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -93,7 +97,7 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         while (true)
         {
             var created = false;
-            var candidate = new InFlightRefresh(cancellationToken.CanBeCanceled);
+            var candidate = new InFlightRefresh(key, _inFlightRefreshes, cancellationToken.CanBeCanceled);
             var entry = _inFlightRefreshes.GetOrAdd(key, candidate);
             if (ReferenceEquals(entry, candidate))
             {
@@ -106,58 +110,58 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
 
             if (!entry.TryAcquireWaiter())
             {
-                // Entry completed right as we observed it; retry to create or join the next entry.
+                // Ensure the closed entry is evicted from _inFlightRefreshes so the next iteration never spins.
+                entry.RemoveFromDictionary();
                 continue;
             }
 
             if (created)
             {
                 _ = ExecuteAndPublishAsync(
-                    key,
                     entry,
                     credentials,
                     failedAuthToken,
-                    clientName);
+                    failedAccessToken,
+                    clientName,
+                    isExplicitClient);
             }
             else
             {
                 Log.CoalescedTokenRefresh(_logger, credentials.ClientId);
             }
 
-            CancellationTokenRegistration registration = default;
-            if (cancellationToken.CanBeCanceled)
-            {
-                registration = cancellationToken.Register(static state => ((InFlightRefresh)state!).ReleaseWaiterOnCancel(), entry);
-            }
-
             try
             {
                 return await entry.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
-            finally
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                await registration.DisposeAsync().ConfigureAwait(false);
+                entry.ReleaseWaiterOnCancel();
+                throw;
             }
         }
     }
 
     private async Task ExecuteAndPublishAsync(
-        (string ClientId, string ClientSecret) key,
         InFlightRefresh entry,
         SitecoreAuthClientCredentials credentials,
         SitecoreAuthToken? failedAuthToken,
-        string? clientName)
+        string? failedAccessToken,
+        string? clientName,
+        bool isExplicitClient)
     {
         try
         {
             var result = await ExecuteRefreshCoreAsync(
                 credentials,
                 failedAuthToken,
+                failedAccessToken,
                 clientName,
+                isExplicitClient,
                 entry.Token).ConfigureAwait(false);
             entry.SetResult(result);
         }
-        catch (OperationCanceledException oce)
+        catch (OperationCanceledException oce) when (entry.IsSelfCanceled)
         {
             entry.SetCanceled(oce.CancellationToken);
         }
@@ -167,9 +171,8 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         }
         finally
         {
+            entry.RemoveFromDictionary();
             entry.MarkCompleted();
-            ((ICollection<KeyValuePair<(string ClientId, string ClientSecret), InFlightRefresh>>)_inFlightRefreshes)
-                .Remove(new KeyValuePair<(string ClientId, string ClientSecret), InFlightRefresh>(key, entry));
             entry.Dispose();
         }
     }
@@ -177,11 +180,64 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
     private async Task<(SitecoreAuthToken AuthToken, string AccessToken)> ExecuteRefreshCoreAsync(
         SitecoreAuthClientCredentials credentials,
         SitecoreAuthToken? failedAuthToken,
+        string? failedAccessToken,
         string? clientName,
+        bool isExplicitClient,
+        CancellationToken cancellationToken)
+    {
+        var clientTag = SitecoreGraphQLDiagnostics.GetClientTag(clientName, isExplicitClient);
+
+        if (_directTokenService is not null)
+        {
+            return await MeasureRefreshWithServiceAsync(
+                _directTokenService,
+                authCache: null,
+                credentials,
+                failedAuthToken,
+                clientTag,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        var scope = _scopeFactory!.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var authCache = scope.ServiceProvider.GetService<Sitecore.API.Foundation.Authorization.Abstractions.ISitecoreTokenCache>();
+            if (failedAuthToken.HasValue && !string.IsNullOrEmpty(failedAccessToken) && authCache is not null)
+            {
+                // Staggered 401 check: if an earlier request already refreshed the cached token past failedAccessToken, reuse it directly.
+                var cached = authCache.GetToken(credentials);
+                if (cached.HasValue)
+                {
+                    var cachedAccess = _tokenAccessor.GetAccessToken(cached.Value);
+                    if (!string.IsNullOrEmpty(cachedAccess) &&
+                        !string.Equals(cachedAccess, failedAccessToken, StringComparison.Ordinal))
+                    {
+                        Log.CoalescedTokenRefresh(_logger, credentials.ClientId);
+                        return (cached.Value, cachedAccess);
+                    }
+                }
+            }
+
+            var tokenService = scope.ServiceProvider.GetRequiredService<ISitecoreTokenService>();
+            return await MeasureRefreshWithServiceAsync(
+                tokenService,
+                authCache,
+                credentials,
+                failedAuthToken,
+                clientTag,
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<(SitecoreAuthToken AuthToken, string AccessToken)> MeasureRefreshWithServiceAsync(
+        ISitecoreTokenService tokenService,
+        Sitecore.API.Foundation.Authorization.Abstractions.ISitecoreTokenCache? authCache,
+        SitecoreAuthClientCredentials credentials,
+        SitecoreAuthToken? failedAuthToken,
+        string clientTag,
         CancellationToken cancellationToken)
     {
         var startTimestamp = Stopwatch.GetTimestamp();
-        var clientTag = SitecoreGraphQLDiagnostics.GetClientTag(clientName);
         SitecoreGraphQLDiagnostics.TokenRefreshes.Add(1, new KeyValuePair<string, object?>("client.name", clientTag));
 
         using var activity = SitecoreGraphQLDiagnostics.ActivitySource.StartActivity("SitecoreGraphQL.RefreshToken");
@@ -189,28 +245,12 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
 
         try
         {
-            if (_directTokenService is not null)
-            {
-                return await RefreshWithServiceAsync(
-                    _directTokenService,
-                    authCache: null,
-                    credentials,
-                    failedAuthToken,
-                    cancellationToken).ConfigureAwait(false);
-            }
-
-            var scope = _scopeFactory!.CreateAsyncScope();
-            await using (scope.ConfigureAwait(false))
-            {
-                var tokenService = scope.ServiceProvider.GetRequiredService<ISitecoreTokenService>();
-                var authCache = scope.ServiceProvider.GetService<Sitecore.API.Foundation.Authorization.Abstractions.ISitecoreTokenCache>();
-                return await RefreshWithServiceAsync(
-                    tokenService,
-                    authCache,
-                    credentials,
-                    failedAuthToken,
-                    cancellationToken).ConfigureAwait(false);
-            }
+            return await RefreshWithServiceAsync(
+                tokenService,
+                authCache,
+                credentials,
+                failedAuthToken,
+                cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -300,15 +340,23 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
     private sealed class InFlightRefresh : IDisposable
     {
         private readonly object _gate = new();
+        private readonly (string ClientId, string ClientSecret) _key;
+        private readonly ConcurrentDictionary<(string ClientId, string ClientSecret), InFlightRefresh> _dictionary;
         private readonly CancellationTokenSource? _cts;
         private readonly TaskCompletionSource<(SitecoreAuthToken AuthToken, string AccessToken)> _tcs =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _activeWaiters;
         private bool _completed;
+        private bool _selfCanceled;
         private bool _disposed;
 
-        public InFlightRefresh(bool canBeCanceled)
+        public InFlightRefresh(
+            (string ClientId, string ClientSecret) key,
+            ConcurrentDictionary<(string ClientId, string ClientSecret), InFlightRefresh> dictionary,
+            bool canBeCanceled)
         {
+            _key = key;
+            _dictionary = dictionary;
             if (canBeCanceled)
             {
                 _cts = new CancellationTokenSource();
@@ -318,6 +366,17 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         public Task<(SitecoreAuthToken AuthToken, string AccessToken)> Task => _tcs.Task;
 
         public CancellationToken Token => _cts?.Token ?? CancellationToken.None;
+
+        public bool IsSelfCanceled
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _selfCanceled;
+                }
+            }
+        }
 
         public bool TryAcquireWaiter()
         {
@@ -332,6 +391,10 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
                 return true;
             }
         }
+
+        public void RemoveFromDictionary()
+            => ((ICollection<KeyValuePair<(string ClientId, string ClientSecret), InFlightRefresh>>)_dictionary)
+                .Remove(new KeyValuePair<(string ClientId, string ClientSecret), InFlightRefresh>(_key, this));
 
         public void SetResult((SitecoreAuthToken AuthToken, string AccessToken) result)
             => _tcs.TrySetResult(result);
@@ -360,12 +423,15 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
                 _activeWaiters--;
                 if (_activeWaiters == 0)
                 {
+                    _completed = true;
+                    _selfCanceled = true;
                     shouldCancel = true;
                 }
             }
 
             if (shouldCancel)
             {
+                RemoveFromDictionary();
                 try
                 {
                     _cts.Cancel();

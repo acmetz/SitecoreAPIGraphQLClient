@@ -56,6 +56,48 @@ jobs:
             --framework ${{ matrix.tfm }} \
             --results-directory ./TestResults/${{ matrix.tfm }}
 
+      - name: Verify >= 80% line coverage (${{ matrix.tfm }})
+        run: |
+          python3 - "${{ matrix.tfm }}" <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+
+          tfm = sys.argv[1]
+          files = glob.glob(f"./TestResults/{tfm}/**/coverage.cobertura.xml", recursive=True)
+          if not files:
+              raise SystemExit(f"No coverage.cobertura.xml found under ./TestResults/{tfm}")
+
+          tree = ET.parse(files[0])
+          pkg = tree.find(".//package[@name='Sitecore.API.Foundation.GraphQL']")
+          if pkg is None:
+              raise SystemExit("Package Sitecore.API.Foundation.GraphQL not found in coverage report.")
+
+          line_rate = float(pkg.attrib["line-rate"])
+          public_prefixes = (
+              "Sitecore.API.Foundation.GraphQL.SitecoreGraphQLFactory",
+              "Sitecore.API.Foundation.GraphQL.SitecoreGraphQLOptions",
+              "Sitecore.API.Foundation.GraphQL.SitecoreGraphQLClientOptions",
+              "Sitecore.API.Foundation.GraphQL.SitecoreGraphQLDiagnostics",
+              "Sitecore.API.Foundation.GraphQL.Http.SitecoreTokenHandler",
+              "Sitecore.API.Foundation.GraphQL.DependencyInjection.ServiceCollectionExtensions",
+          )
+          pub_valid = 0
+          pub_covered = 0
+          for cls in pkg.findall(".//class"):
+              name = cls.attrib.get("name", "")
+              if name.startswith(public_prefixes):
+                  for line in cls.findall("./lines/line"):
+                      pub_valid += 1
+                      if int(line.attrib.get("hits", "0")) > 0:
+                          pub_covered += 1
+
+          pub_rate = (pub_covered / pub_valid) if pub_valid else 1.0
+          print(f"[{tfm}] Overall line coverage: {line_rate:.2%}; Public API line coverage: {pub_rate:.2%} ({pub_covered}/{pub_valid})")
+          if line_rate < 0.80:
+              raise SystemExit(f"Overall line coverage {line_rate:.2%} is below 80% threshold.")
+          if pub_rate < 0.80:
+              raise SystemExit(f"Public API line coverage {pub_rate:.2%} is below 80% threshold.")
+          PY
+
       - name: Upload test results (${{ matrix.tfm }})
         uses: actions/upload-artifact@v4
         if: always()

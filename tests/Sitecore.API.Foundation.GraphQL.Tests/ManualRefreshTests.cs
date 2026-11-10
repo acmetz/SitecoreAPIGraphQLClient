@@ -204,6 +204,20 @@ public class ManualRefreshTests
         (await unconfiguredCache.ForceRefreshAsync(CancellationToken.None)).ShouldBeNull();
         unconfiguredCache.CurrentToken.ShouldBeNull();
         strictUnusedService.VerifyNoOtherCalls();
+
+        // Also verify DI-registered ISitecoreTokenCache constructor (resolved via AddSitecoreGraphQL)
+        var diServices = new ServiceCollection();
+        diServices.AddSitecoreGraphQL(o =>
+        {
+            o.Endpoint = "https://unit/graphql";
+            o.ClientId = "id";
+            o.ClientSecret = "secret";
+        });
+        diServices.AddSingleton(tokenService.Object);
+        using var diProvider = diServices.BuildServiceProvider();
+        var diCache = diProvider.GetRequiredService<ISitecoreTokenCache>();
+        (await diCache.GetOrRefreshAsync(CancellationToken.None)).ShouldBe("tok-v1");
+        diCache.CurrentToken.ShouldBe("tok-v1");
 #pragma warning restore CS0618
     }
 
