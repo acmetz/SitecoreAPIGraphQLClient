@@ -97,6 +97,13 @@ internal static class EndpointUriValidator
             return false;
         }
 
+        if (IsCanonicalHttpsEndpoint(rawEndpoint))
+        {
+            normalizedEndpoint = rawEndpoint;
+            errorMessage = string.Empty;
+            return true;
+        }
+
         if (!Uri.TryCreate(rawEndpoint, UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
         {
@@ -187,5 +194,57 @@ internal static class EndpointUriValidator
         }
 
         return rawEndpoint.AsSpan(authorityStart, authorityEnd - authorityStart).Contains('@');
+    }
+
+    private static bool IsCanonicalHttpsEndpoint(string rawEndpoint)
+    {
+        const string HttpsPrefix = "https://";
+        if (!rawEndpoint.StartsWith(HttpsPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var span = rawEndpoint.AsSpan();
+        var slashIndex = span[HttpsPrefix.Length..].IndexOf('/');
+        if (slashIndex <= 0)
+        {
+            // No explicit path slash or empty host; defer to System.Uri canonicalization.
+            return false;
+        }
+
+        var authorityEnd = HttpsPrefix.Length + slashIndex;
+        var host = span[HttpsPrefix.Length..authorityEnd];
+        if (host[0] == '.' || host[^1] == '.')
+        {
+            return false;
+        }
+
+        var prevDot = false;
+        foreach (var ch in host)
+        {
+            var isValidHostChar = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '.';
+            if (!isValidHostChar || (ch == '.' && prevDot))
+            {
+                return false;
+            }
+
+            prevDot = ch == '.';
+        }
+
+        var pathAndQuery = span[authorityEnd..];
+        if (pathAndQuery.Contains("/.", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var ch in pathAndQuery)
+        {
+            if (ch <= ' ' || ch >= 0x7F || ch is '#' or '\\' or '%' or '"' or '<' or '>' or '`' or '{' or '}' or '|' or '^' or '[' or ']')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

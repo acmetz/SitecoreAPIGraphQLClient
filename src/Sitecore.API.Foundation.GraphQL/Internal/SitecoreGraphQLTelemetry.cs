@@ -1,7 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 
 namespace Sitecore.API.Foundation.GraphQL.Internal;
 
+[ExcludeFromCodeCoverage]
 internal static partial class Log
 {
     [LoggerMessage(

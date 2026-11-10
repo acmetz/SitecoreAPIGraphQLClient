@@ -83,4 +83,80 @@ public class DependencyInjectionOverloadTests
         // Assert: the toggle is bound to false
         options.EnableInternalLoggingSetup.ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task AddSitecoreGraphQL_four_parameter_overloads_invoke_configure_once_and_customize_client_builder()
+    {
+        var configureInvocationCount = 0;
+        var builderCustomized = false;
+
+        var services = new ServiceCollection();
+        services.AddSitecoreGraphQL(
+            o =>
+            {
+                configureInvocationCount++;
+                o.Endpoint = "https://unit/graphql";
+                o.ClientId = "id";
+                o.ClientSecret = "secret";
+            },
+            configureResilience: null,
+            configureClient: builder =>
+            {
+                builderCustomized = true;
+                builder.ConfigureHttpClient(c => c.DefaultRequestHeaders.Add("X-Custom-Client", "enabled"));
+            });
+
+        services.AddSingleton(Mock.Of<ISitecoreTokenService>());
+
+        using var provider = services.BuildServiceProvider();
+        _ = provider.GetRequiredService<IOptions<SitecoreGraphQLOptions>>().Value;
+        var factory = provider.GetRequiredService<ISitecoreGraphQLFactory>();
+        var gqlClient = await factory.CreateClientAsync();
+
+        gqlClient.ShouldNotBeNull();
+        configureInvocationCount.ShouldBe(1);
+        builderCustomized.ShouldBeTrue();
+
+        var namedHttpClient = provider.GetRequiredService<IHttpClientFactory>().CreateClient(SitecoreGraphQLFactory.NamedHttpClient);
+        namedHttpClient.DefaultRequestHeaders.GetValues("X-Custom-Client").ShouldContain("enabled");
+
+        // Also verify IConfiguration 4-parameter overload with resilience enabled
+        var cfg = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Sitecore:GraphQL:Endpoint"] = "https://cfg/graphql",
+                ["Sitecore:GraphQL:ClientId"] = "cfg-id",
+                ["Sitecore:GraphQL:ClientSecret"] = "cfg-secret"
+            })
+            .Build();
+
+        var cfgServices = new ServiceCollection();
+        var resilienceConfigured = false;
+        cfgServices.AddSitecoreGraphQL(
+            cfg,
+            configureResilience: r =>
+            {
+                resilienceConfigured = true;
+                r.Retry.MaxRetryAttempts = 1;
+            },
+            configureClient: b =>
+            {
+                b.ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(45));
+                b.ConfigurePrimaryHttpMessageHandler(() => new StubOkHandler());
+            });
+        cfgServices.AddSingleton(Mock.Of<ISitecoreTokenService>());
+
+        using var cfgProvider = cfgServices.BuildServiceProvider();
+        var cfgHttpClient = cfgProvider.GetRequiredService<IHttpClientFactory>().CreateClient(SitecoreGraphQLFactory.NamedHttpClient);
+        cfgHttpClient.Timeout.ShouldBe(TimeSpan.FromSeconds(45));
+        using var resp = await cfgHttpClient.GetAsync("https://cfg/graphql");
+        resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+        resilienceConfigured.ShouldBeTrue();
+    }
+
+    private sealed class StubOkHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+    }
 }

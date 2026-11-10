@@ -23,6 +23,7 @@
     <Project Path="src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Sitecore.API.Foundation.GraphQL.Benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks.csproj" />
     <Project Path="tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj" />
   </Folder>
 </Solution>

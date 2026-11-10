@@ -104,4 +104,35 @@ public class CancellationTests
         // Expect only two sends: initial + immediate retry before backoff; cancellation prevents further retries
         inner.Calls.ShouldBe(2);
     }
+
+    [Fact]
+    public async Task CancellationToken_propagates_into_ISitecoreTokenService()
+    {
+        using var cts = new CancellationTokenSource();
+        var observedCancelableToken = false;
+
+        var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
+        tokenService
+            .Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
+            .Returns(async (SitecoreAuthClientCredentials _, CancellationToken ct) =>
+            {
+                observedCancelableToken = ct.CanBeCanceled;
+                await cts.CancelAsync();
+                ct.ThrowIfCancellationRequested();
+                return default;
+            });
+
+        var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
+        var options = Options.Create(new SitecoreGraphQLOptions { ClientId = "id", ClientSecret = "secret" });
+        var inner = new AlwaysUnauthorizedHandler();
+        using var handler = new SitecoreTokenHandler(tokenService.Object, options, accessor.Object)
+        {
+            InnerHandler = inner
+        };
+        using var client = new HttpClient(handler);
+
+        await Should.ThrowAsync<OperationCanceledException>(async () => await client.GetAsync("https://unit.test", cts.Token));
+        observedCancelableToken.ShouldBeTrue();
+        inner.Calls.ShouldBe(0);
+    }
 }

@@ -254,5 +254,74 @@ public class SitecoreGraphQLFactoryTests
         // Act & Assert
         await Should.ThrowAsync<InvalidOperationException>(async () => await factory.CreateClientAsync());
     }
+
+    [Theory]
+    [InlineData("", "id", "secret")]
+    [InlineData("   ", "id", "secret")]
+    [InlineData("https://example/graphql", "", "secret")]
+    [InlineData("https://example/graphql", "   ", "secret")]
+    [InlineData("https://example/graphql", "id", "")]
+    [InlineData("https://example/graphql", "id", "   ")]
+    [InlineData("/relative/graphql", "id", "secret")]
+    [InlineData("ftp://example/graphql", "id", "secret")]
+    [InlineData("http://remote-host/graphql", "id", "secret")]
+    [InlineData("https://user:pass@example/graphql", "id", "secret")]
+    public async Task CreateClientAsync_invalid_or_insecure_inputs_throw_ArgumentException(
+        string url,
+        string clientId,
+        string clientSecret)
+    {
+        var services = new ServiceCollection();
+        services.AddHttpClient();
+        services.AddSingleton(Mock.Of<ISitecoreTokenService>());
+        services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.Configure<SitecoreGraphQLOptions>(_ => { });
+        services.AddSingleton<ISitecoreGraphQLFactory, SitecoreGraphQLFactory>();
+
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<ISitecoreGraphQLFactory>();
+
+        await Should.ThrowAsync<ArgumentException>(
+            async () => await factory.CreateClientAsync(url, clientId, clientSecret));
+    }
+
+    [Fact]
+    public async Task CreateClientAsync_null_arguments_throw_ArgumentNullException()
+    {
+        var services = new ServiceCollection();
+        services.AddHttpClient();
+        services.AddSingleton(Mock.Of<ISitecoreTokenService>());
+        services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.Configure<SitecoreGraphQLOptions>(_ => { });
+        services.AddSingleton<ISitecoreGraphQLFactory, SitecoreGraphQLFactory>();
+
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<ISitecoreGraphQLFactory>();
+
+        await Should.ThrowAsync<ArgumentNullException>(async () => await factory.CreateClientAsync(null!, "id", "secret"));
+        await Should.ThrowAsync<ArgumentNullException>(async () => await factory.CreateClientAsync("https://example/graphql", null!, "secret"));
+        await Should.ThrowAsync<ArgumentNullException>(async () => await factory.CreateClientAsync("https://example/graphql", "id", null!));
+        await Should.ThrowAsync<ArgumentNullException>(async () => await factory.CreateClientByNameAsync(null!));
+    }
+
+    [Fact]
+    public async Task CreateClientAsync_allows_loopback_http_by_default_and_non_loopback_http_when_AllowInsecureHttp_enabled()
+    {
+        var services = new ServiceCollection();
+        services.AddHttpClient();
+        services.AddSingleton(Mock.Of<ISitecoreTokenService>());
+        services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.Configure<SitecoreGraphQLOptions>(o => o.AllowInsecureHttp = true);
+        services.AddSingleton<ISitecoreGraphQLFactory, SitecoreGraphQLFactory>();
+
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<ISitecoreGraphQLFactory>();
+
+        var loopbackClient = await factory.CreateClientAsync("http://localhost:4000/graphql", "id", "secret");
+        var containerClient = await factory.CreateClientAsync("http://cm/sitecore/api/graph/edge", "id", "secret");
+
+        loopbackClient.ShouldNotBeNull();
+        containerClient.ShouldNotBeNull();
+    }
 }
 #pragma warning restore CS0618

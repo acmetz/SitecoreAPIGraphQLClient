@@ -66,4 +66,26 @@ public class DependencyInjectionLoggingToggleTests
         // Assert
         options.EnableInternalLoggingSetup.ShouldBeFalse();
     }
+
+    [Fact]
+    public void TryAddInternalLogging_registers_LoggerFilterOptions_and_preserves_host_filter_rules()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
+
+        var cfg = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Sitecore:GraphQL:Endpoint"] = "https://configured/graphql",
+                ["Sitecore:GraphQL:ClientId"] = "cfg-id",
+                ["Sitecore:GraphQL:ClientSecret"] = "cfg-secret"
+            })
+            .Build();
+
+        services.AddSitecoreGraphQL(cfg);
+
+        using var provider = services.BuildServiceProvider();
+        var filterOptions = provider.GetRequiredService<IOptions<LoggerFilterOptions>>().Value;
+        filterOptions.MinLevel.ShouldBe(LogLevel.Warning);
+    }
 }

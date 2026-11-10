@@ -93,7 +93,7 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         while (true)
         {
             var created = false;
-            var candidate = new InFlightRefresh();
+            var candidate = new InFlightRefresh(cancellationToken.CanBeCanceled);
             var entry = _inFlightRefreshes.GetOrAdd(key, candidate);
             if (ReferenceEquals(entry, candidate))
             {
@@ -300,16 +300,24 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
     private sealed class InFlightRefresh : IDisposable
     {
         private readonly object _gate = new();
-        private readonly CancellationTokenSource _cts = new();
+        private readonly CancellationTokenSource? _cts;
         private readonly TaskCompletionSource<(SitecoreAuthToken AuthToken, string AccessToken)> _tcs =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _activeWaiters;
         private bool _completed;
         private bool _disposed;
 
+        public InFlightRefresh(bool canBeCanceled)
+        {
+            if (canBeCanceled)
+            {
+                _cts = new CancellationTokenSource();
+            }
+        }
+
         public Task<(SitecoreAuthToken AuthToken, string AccessToken)> Task => _tcs.Task;
 
-        public CancellationToken Token => _cts.Token;
+        public CancellationToken Token => _cts?.Token ?? CancellationToken.None;
 
         public bool TryAcquireWaiter()
         {
@@ -336,6 +344,11 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
 
         public void ReleaseWaiterOnCancel()
         {
+            if (_cts is null)
+            {
+                return;
+            }
+
             var shouldCancel = false;
             lock (_gate)
             {
@@ -385,7 +398,7 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
                 _completed = true;
             }
 
-            _cts.Dispose();
+            _cts?.Dispose();
         }
     }
 }

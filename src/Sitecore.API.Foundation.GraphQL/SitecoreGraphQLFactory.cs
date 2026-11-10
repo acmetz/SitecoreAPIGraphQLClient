@@ -15,7 +15,9 @@ namespace Sitecore.API.Foundation.GraphQL;
 /// </summary>
 public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
 {
-    private readonly ConcurrentDictionary<ClientCacheKey, Lazy<IGraphQLClient>> _clients = new();
+    private readonly record struct CachedClientEntry(IGraphQLClient Client, Task<IGraphQLClient> CompletedTask);
+
+    private readonly ConcurrentDictionary<ClientCacheKey, Lazy<CachedClientEntry>> _clients = new();
     private readonly Queue<ClientCacheKey> _dynamicEvictionQueue = new();
     private readonly object _evictionLock = new();
 
@@ -92,20 +94,17 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
             opts.AllowInsecureHttp,
             nameof(url),
             throwInvalidOperation: false);
-        var sanitizedUrl = EndpointUriValidator.SanitizeForLogging(url);
         var credentials = new SitecoreAuthClientCredentials(clientId, clientSecret);
 
-        var client = GetOrCreateClient(
+        return GetOrCreateClientTask(
             normalizedUrl,
-            sanitizedUrl,
+            url,
             credentials,
             clientName: null,
             isExplicitClient: true,
             isConfiguredClient: false,
             allowPostRetries: opts.AllowPostRetries,
             opts.MaxCachedClients);
-
-        return Task.FromResult(client);
     }
 
     /// <summary>
@@ -127,7 +126,6 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(url);
 
         var opts = CurrentOptions;
-        var sanitizedUrl = EndpointUriValidator.SanitizeForLogging(url);
         var normalizedUrl = EndpointUriValidator.ValidateAndNormalizeEndpoint(
             url,
             opts.AllowInsecureHttp,
@@ -136,7 +134,7 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
 
         if (!opts.TryBuildCredentials(out var credentials))
         {
-            Log.MissingDefaultCredentialsForClient(_logger, sanitizedUrl);
+            Log.MissingDefaultCredentialsForClient(_logger, EndpointUriValidator.SanitizeForLogging(url));
             throw new InvalidOperationException("ClientId and ClientSecret must be configured in options when not provided explicitly.");
         }
 
@@ -144,17 +142,15 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
             EndpointUriValidator.TryValidateEndpoint(opts.Endpoint!, opts.AllowInsecureHttp, out var normalizedDefault, out _) &&
             string.Equals(normalizedUrl, normalizedDefault, StringComparison.Ordinal);
 
-        var client = GetOrCreateClient(
+        return GetOrCreateClientTask(
             normalizedUrl,
-            sanitizedUrl,
+            url,
             credentials,
             clientName: null,
             isExplicitClient: false,
             isConfiguredClient: isDefaultEndpoint,
             allowPostRetries: opts.AllowPostRetries,
             opts.MaxCachedClients);
-
-        return Task.FromResult(client);
     }
 
     /// <summary>
@@ -178,7 +174,6 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
             throw new InvalidOperationException("Endpoint must be configured in options.");
         }
 
-        var sanitizedUrl = EndpointUriValidator.SanitizeForLogging(opts.Endpoint);
         var normalizedUrl = EndpointUriValidator.ValidateAndNormalizeEndpoint(
             opts.Endpoint,
             opts.AllowInsecureHttp,
@@ -187,21 +182,19 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
 
         if (!opts.TryBuildCredentials(out var credentials))
         {
-            Log.MissingDefaultCredentialsForClient(_logger, sanitizedUrl);
+            Log.MissingDefaultCredentialsForClient(_logger, EndpointUriValidator.SanitizeForLogging(opts.Endpoint));
             throw new InvalidOperationException("ClientId and ClientSecret must be configured in options when not provided explicitly.");
         }
 
-        var client = GetOrCreateClient(
+        return GetOrCreateClientTask(
             normalizedUrl,
-            sanitizedUrl,
+            opts.Endpoint,
             credentials,
             clientName: null,
             isExplicitClient: false,
             isConfiguredClient: true,
             allowPostRetries: opts.AllowPostRetries,
             opts.MaxCachedClients);
-
-        return Task.FromResult(client);
     }
 
     /// <summary>
@@ -220,19 +213,17 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(clientName);
 
         var opts = CurrentOptions;
-        var (normalizedUrl, sanitizedUrl, credentials, allowPostRetries) = ResolveNamedClientOrThrow(opts, clientName);
+        var (normalizedUrl, rawUrl, credentials, allowPostRetries) = ResolveNamedClientOrThrow(opts, clientName);
 
-        var client = GetOrCreateClient(
+        return GetOrCreateClientTask(
             normalizedUrl,
-            sanitizedUrl,
+            rawUrl,
             credentials,
             clientName,
             isExplicitClient: false,
             isConfiguredClient: true,
             allowPostRetries,
             opts.MaxCachedClients);
-
-        return Task.FromResult(client);
     }
 
     /// <inheritdoc />
@@ -391,7 +382,7 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
 
         foreach (var (_, lazy) in _clients)
         {
-            if (lazy.IsValueCreated && lazy.Value is IDisposable disposableClient)
+            if (lazy.IsValueCreated && lazy.Value.Client is IDisposable disposableClient)
             {
                 disposableClient.Dispose();
             }
@@ -400,9 +391,9 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
         _clients.Clear();
     }
 
-    private IGraphQLClient GetOrCreateClient(
+    private Task<IGraphQLClient> GetOrCreateClientTask(
         string normalizedUrl,
-        string sanitizedUrl,
+        string rawUrlForSanitization,
         SitecoreAuthClientCredentials credentials,
         string? clientName,
         bool isExplicitClient,
@@ -419,19 +410,28 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
 
         if (_clients.TryGetValue(key, out var existingLazy))
         {
-            Log.ReusingCachedGraphQLClient(_logger, sanitizedUrl, credentials.ClientId);
-            return existingLazy.Value;
+            if (_logger.IsEnabled(LogLevel.Trace))
+            {
+                Log.ReusingCachedGraphQLClient(_logger, EndpointUriValidator.SanitizeForLogging(rawUrlForSanitization), credentials.ClientId);
+            }
+
+            return existingLazy.Value.CompletedTask;
         }
 
-        var createdLazy = new Lazy<IGraphQLClient>(
-            () => CreateClientInstance(normalizedUrl, sanitizedUrl, credentials, clientName, isExplicitClient, allowPostRetries),
+        var sanitizedUrl = EndpointUriValidator.SanitizeForLogging(rawUrlForSanitization);
+        var createdLazy = new Lazy<CachedClientEntry>(
+            () =>
+            {
+                var client = CreateClientInstance(normalizedUrl, sanitizedUrl, credentials, clientName, isExplicitClient, allowPostRetries);
+                return new CachedClientEntry(client, Task.FromResult(client));
+            },
             LazyThreadSafetyMode.ExecutionAndPublication);
 
         var winningLazy = _clients.GetOrAdd(key, createdLazy);
         if (!ReferenceEquals(winningLazy, createdLazy))
         {
             Log.ReusingCachedGraphQLClient(_logger, sanitizedUrl, credentials.ClientId);
-            return winningLazy.Value;
+            return winningLazy.Value.CompletedTask;
         }
 
         Log.CreatingGraphQLClient(_logger, sanitizedUrl, credentials.ClientId);
@@ -441,7 +441,7 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
             TrackAndEvictDynamicClients(key, Math.Max(1, maxCachedClients));
         }
 
-        return winningLazy.Value;
+        return winningLazy.Value.CompletedTask;
     }
 
     private void TrackAndEvictDynamicClients(ClientCacheKey addedKey, int maxCachedClients)
@@ -493,7 +493,7 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
         return client;
     }
 
-    private static (string NormalizedUrl, string SanitizedUrl, SitecoreAuthClientCredentials Credentials, bool AllowPostRetries) ResolveNamedClientOrThrow(
+    private static (string NormalizedUrl, string RawUrl, SitecoreAuthClientCredentials Credentials, bool AllowPostRetries) ResolveNamedClientOrThrow(
         SitecoreGraphQLOptions opts,
         string clientName)
     {
@@ -523,13 +523,12 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
         var allowInsecureHttp = clientOpts.AllowInsecureHttp ?? opts.AllowInsecureHttp;
         var allowPostRetries = clientOpts.AllowPostRetries ?? opts.AllowPostRetries;
 
-        var sanitizedUrl = EndpointUriValidator.SanitizeForLogging(rawUrl);
         var normalizedUrl = EndpointUriValidator.ValidateAndNormalizeEndpoint(
             rawUrl,
             allowInsecureHttp,
             nameof(clientName),
             throwInvalidOperation: true);
 
-        return (normalizedUrl, sanitizedUrl, new SitecoreAuthClientCredentials(rawId, rawSecret), allowPostRetries);
+        return (normalizedUrl, rawUrl, new SitecoreAuthClientCredentials(rawId, rawSecret), allowPostRetries);
     }
 }
