@@ -13,6 +13,10 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<SitecoreGraphQLFactory>? _logger;
     private readonly ISitecoreTokenCache _tokenCache;
+    private readonly Authorization.Abstractions.ISitecoreTokenService _tokenService;
+    private readonly System.Net.Http.IHttpMessageHandlerFactory _httpMessageHandlerFactory;
+    private readonly ITokenValueAccessor _tokenAccessor;
+    private readonly ILogger<Http.SitecoreTokenHandler>? _tokenHandlerLogger;
 
     public const string NamedHttpClient = "SitecoreGraphQL";
 
@@ -21,13 +25,19 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
         IOptions<SitecoreGraphQLOptions> options,
         IHttpClientFactory httpClientFactory,
         ISitecoreTokenCache tokenCache,
-        ILogger<SitecoreGraphQLFactory>? logger = null)
+        System.Net.Http.IHttpMessageHandlerFactory httpMessageHandlerFactory,
+        ITokenValueAccessor tokenAccessor,
+        ILogger<SitecoreGraphQLFactory>? logger = null,
+        ILogger<Http.SitecoreTokenHandler>? tokenHandlerLogger = null)
     {
-        _ = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
+        _tokenService = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _tokenCache = tokenCache ?? throw new ArgumentNullException(nameof(tokenCache));
+        _httpMessageHandlerFactory = httpMessageHandlerFactory ?? throw new ArgumentNullException(nameof(httpMessageHandlerFactory));
+        _tokenAccessor = tokenAccessor ?? throw new ArgumentNullException(nameof(tokenAccessor));
         _logger = logger;
+        _tokenHandlerLogger = tokenHandlerLogger;
     }
 
     public async Task<IGraphQLClient> CreateClientAsync(string url, string clientId, string clientSecret, CancellationToken cancellationToken = default)
@@ -40,7 +50,7 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
         var lazy = _clients.GetOrAdd(key, _ =>
         {
             _logger?.LogDebug("Creating new GraphQL client for {Url} and clientId {ClientId}", url, clientId);
-            return new Lazy<Task<IGraphQLClient>>(() => CreateClientInternalAsync(url));
+            return new Lazy<Task<IGraphQLClient>>(() => CreateClientInternalAsync(url, clientId, clientSecret));
         });
 
         if (_clients.ContainsKey(key))
@@ -88,9 +98,17 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
         return refreshed;
     }
 
-    private Task<IGraphQLClient> CreateClientInternalAsync(string url)
+    private Task<IGraphQLClient> CreateClientInternalAsync(string url, string clientId, string clientSecret)
     {
-        var httpClient = _httpClientFactory.CreateClient(NamedHttpClient);
+        var credentials = new Authorization.Models.SitecoreAuthClientCredentials(clientId, clientSecret);
+
+        var innerHandler = _httpMessageHandlerFactory.CreateHandler(NamedHttpClient);
+        var tokenHandler = new Http.SitecoreTokenHandler(_tokenService, _options, _tokenAccessor, credentials, _tokenHandlerLogger)
+        {
+            InnerHandler = innerHandler
+        };
+
+        var httpClient = new HttpClient(tokenHandler);
         var options = new GraphQLHttpClientOptions { EndPoint = new Uri(url) };
 
         // Use Newtonsoft.Json serializer

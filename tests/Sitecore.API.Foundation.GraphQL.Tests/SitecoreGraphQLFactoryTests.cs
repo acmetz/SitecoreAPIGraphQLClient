@@ -50,6 +50,7 @@ public class SitecoreGraphQLFactoryTests
         var tokenServiceMock = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
         services.AddSingleton(tokenServiceMock.Object);
         services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.AddSingleton<ITokenValueAccessor>(Mock.Of<ITokenValueAccessor>());
 
         services.AddSingleton<ISitecoreGraphQLFactory, SitecoreGraphQLFactory>();
         services.Configure<object>("dummy", _ => { }); // ensure options infrastructure available
@@ -102,6 +103,7 @@ public class SitecoreGraphQLFactoryTests
 
         // Also add a token service stub so factory can be resolved if needed later
         services.AddSingleton(Mock.Of<ISitecoreTokenService>());
+        services.AddSingleton(Mock.Of<ITokenValueAccessor>());
 
         // Assert
         var provider = services.BuildServiceProvider();
@@ -147,6 +149,7 @@ public class SitecoreGraphQLFactoryTests
         services.AddHttpClient();
         services.AddSingleton(tokenServiceMock.Object);
         services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.AddSingleton<ITokenValueAccessor>(Mock.Of<ITokenValueAccessor>());
         services.Configure<SitecoreGraphQLOptions>(o =>
         {
             o.Endpoint = "https://example/graphql";
@@ -184,6 +187,7 @@ public class SitecoreGraphQLFactoryTests
         services.AddHttpClient();
         services.AddSingleton(tokenServiceMock.Object);
         services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.AddSingleton<ITokenValueAccessor>(Mock.Of<ITokenValueAccessor>());
         services.Configure<SitecoreGraphQLOptions>(o =>
         {
             o.ClientId = "cfg-id";
@@ -211,6 +215,7 @@ public class SitecoreGraphQLFactoryTests
         services.AddHttpClient();
         services.AddSingleton(tokenServiceMock.Object);
         services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.AddSingleton<ITokenValueAccessor>(Mock.Of<ITokenValueAccessor>());
         services.Configure<SitecoreGraphQLOptions>(o =>
         {
             o.Endpoint = "https://configured/graphql";

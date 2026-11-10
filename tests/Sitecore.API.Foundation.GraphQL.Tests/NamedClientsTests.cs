@@ -24,6 +24,7 @@ public class NamedClientsTests
         services.AddHttpClient();
         services.AddSingleton(Mock.Of<ISitecoreTokenService>());
         services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.AddSingleton<ITokenValueAccessor>(Mock.Of<ITokenValueAccessor>());
         services.Configure<SitecoreGraphQLOptions>(o =>
         {
             o.ClientId = "default-id";
@@ -64,6 +65,7 @@ public class NamedClientsTests
         services.AddHttpClient();
         services.AddSingleton(Mock.Of<ISitecoreTokenService>());
         services.AddSingleton<ISitecoreTokenCache>(Mock.Of<ISitecoreTokenCache>());
+        services.AddSingleton<ITokenValueAccessor>(Mock.Of<ITokenValueAccessor>());
         services.Configure<SitecoreGraphQLOptions>(o =>
         {
             o.Clients["content"] = new SitecoreGraphQLClientOptions

@@ -45,7 +45,7 @@ internal sealed class SitecoreTokenCache : ISitecoreTokenCache
         {
             if (!string.IsNullOrEmpty(_token)) return _token;
 
-            if (!TryBuildCredentials(out var credentials))
+            if (!_options.Value.TryBuildCredentials(out var credentials))
             {
                 _logger?.LogWarning("Cannot refresh Sitecore token due to missing ClientId/ClientSecret in options.");
                 _token = null;
@@ -60,17 +60,5 @@ internal sealed class SitecoreTokenCache : ISitecoreTokenCache
         {
             _lock.Release();
         }
-    }
-
-    private bool TryBuildCredentials(out SitecoreAuthClientCredentials credentials)
-    {
-        var opts = _options.Value;
-        if (!string.IsNullOrWhiteSpace(opts.ClientId) && !string.IsNullOrWhiteSpace(opts.ClientSecret))
-        {
-            credentials = new SitecoreAuthClientCredentials(opts.ClientId, opts.ClientSecret);
-            return true;
-        }
-        credentials = default;
-        return false;
     }
 }
