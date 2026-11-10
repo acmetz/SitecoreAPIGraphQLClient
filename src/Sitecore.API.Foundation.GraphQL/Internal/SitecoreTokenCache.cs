@@ -1,19 +1,19 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sitecore.API.Foundation.Authorization.Abstractions;
-using Sitecore.API.Foundation.Authorization.Models;
 
 namespace Sitecore.API.Foundation.GraphQL.Internal;
 
+#pragma warning disable CS0618 // Implements obsolete ISitecoreTokenCache adapter for v1.x backward compatibility
 internal sealed class SitecoreTokenCache : ISitecoreTokenCache
 {
-    private readonly ISitecoreTokenService _tokenService;
-    private readonly IOptions<SitecoreGraphQLOptions> _options;
-    private readonly ITokenValueAccessor _accessor;
-    private readonly ILogger<SitecoreTokenCache>? _logger;
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly ISitecoreTokenCoordinator _coordinator;
+    private readonly IOptionsMonitor<SitecoreGraphQLOptions>? _optionsMonitor;
+    private readonly IOptions<SitecoreGraphQLOptions>? _staticOptions;
+    private readonly ILogger _logger;
 
-    private string? _token;
+    private volatile string? _lastToken;
 
     public SitecoreTokenCache(
         ISitecoreTokenService tokenService,
@@ -21,44 +21,65 @@ internal sealed class SitecoreTokenCache : ISitecoreTokenCache
         ITokenValueAccessor accessor,
         ILogger<SitecoreTokenCache>? logger = null)
     {
-        _tokenService = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
-        _options = options ?? throw new ArgumentNullException(nameof(options));
-        _accessor = accessor ?? throw new ArgumentNullException(nameof(accessor));
-        _logger = logger;
+        ArgumentNullException.ThrowIfNull(tokenService);
+        _staticOptions = options ?? throw new ArgumentNullException(nameof(options));
+        ArgumentNullException.ThrowIfNull(accessor);
+        _coordinator = new SitecoreTokenCoordinator(tokenService, accessor);
+        _logger = (ILogger?)logger ?? NullLogger<SitecoreTokenCache>.Instance;
     }
 
-    public string? CurrentToken => _token;
+    internal SitecoreTokenCache(
+        ISitecoreTokenCoordinator coordinator,
+        IOptionsMonitor<SitecoreGraphQLOptions> optionsMonitor,
+        ILogger<SitecoreTokenCache>? logger = null)
+    {
+        _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
+        _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+        _logger = (ILogger?)logger ?? NullLogger<SitecoreTokenCache>.Instance;
+    }
+
+    public string? CurrentToken => _lastToken;
 
     public async Task<string?> GetOrRefreshAsync(CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrEmpty(_token)) return _token;
-        return await RefreshCoreAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var opts = CurrentOptions;
+        if (!opts.TryBuildCredentials(out var credentials))
+        {
+            Log.LegacyCacheMissingCredentials(_logger);
+            _lastToken = null;
+            return null;
+        }
+
+        var (_, accessToken) = await _coordinator.GetTokenAsync(credentials, clientName: null, cancellationToken).ConfigureAwait(false);
+        _lastToken = accessToken;
+        return accessToken;
     }
 
-    public Task<string?> ForceRefreshAsync(CancellationToken cancellationToken)
-        => RefreshCoreAsync(cancellationToken);
-
-    private async Task<string?> RefreshCoreAsync(CancellationToken cancellationToken)
+    public async Task<string?> ForceRefreshAsync(CancellationToken cancellationToken)
     {
-        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (!string.IsNullOrEmpty(_token)) return _token;
+        cancellationToken.ThrowIfCancellationRequested();
 
-            if (!_options.Value.TryBuildCredentials(out var credentials))
-            {
-                _logger?.LogWarning("Cannot refresh Sitecore token due to missing ClientId/ClientSecret in options.");
-                _token = null;
-                return _token;
-            }
-
-            var token = await _tokenService.GetSitecoreAuthToken(credentials).ConfigureAwait(false);
-            _token = _accessor.GetAccessToken(token);
-            return _token;
-        }
-        finally
+        var opts = CurrentOptions;
+        if (!opts.TryBuildCredentials(out var credentials))
         {
-            _lock.Release();
+            Log.LegacyCacheMissingCredentials(_logger);
+            _lastToken = null;
+            return null;
         }
+
+        var (_, accessToken) = await _coordinator.RefreshTokenAsync(
+            credentials,
+            failedAuthToken: null,
+            failedAccessToken: _lastToken,
+            clientName: null,
+            cancellationToken).ConfigureAwait(false);
+        _lastToken = accessToken;
+        return accessToken;
     }
+
+    private SitecoreGraphQLOptions CurrentOptions
+        => _optionsMonitor?.CurrentValue ?? _staticOptions!.Value;
 }
+#pragma warning restore CS0618

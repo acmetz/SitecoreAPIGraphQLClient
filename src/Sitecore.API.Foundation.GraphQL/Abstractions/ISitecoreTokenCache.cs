@@ -3,6 +3,7 @@ namespace Sitecore.API.Foundation.GraphQL;
 /// <summary>
 /// Abstraction for a shared token cache used to get or refresh the current Sitecore access token.
 /// </summary>
+[Obsolete("ISitecoreTokenCache in Sitecore.API.Foundation.GraphQL is obsolete and will be removed in v2.0.0. Token caching is now delegated directly to ISitecoreTokenService in Sitecore.API.Foundation.Authorization.")]
 public interface ISitecoreTokenCache
 {
     /// <summary>

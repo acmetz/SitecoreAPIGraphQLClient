@@ -40,7 +40,7 @@ public class GuidDeserializationTests
         // Minimal options via delegate
         services.AddSitecoreGraphQL(o =>
         {
-            o.Endpoint = "http://unit.test/graphql";
+            o.Endpoint = "https://unit.test/graphql";
             o.ClientId = "id";
             o.ClientSecret = "secret";
             o.EnableUnauthorizedRefresh = false; // keep handler behavior minimal
@@ -48,7 +48,7 @@ public class GuidDeserializationTests
 
         // Provide token service/accessor for handler
         var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
+        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(default(SitecoreAuthToken));
         services.AddSingleton(tokenService.Object);
 
@@ -133,5 +133,42 @@ public class GuidDeserializationTests
         result.Data.Node.FolderId.ShouldBe(g);
         result.Data.Node.MaybeId.ShouldBe(g);
         result.Data.Node.Ids.Single().ShouldBe(g);
+    }
+
+    [Fact]
+    public async Task GraphQL_client_allows_internal_container_http_endpoint_when_AllowInsecureHttp_enabled()
+    {
+        var g = Guid.NewGuid();
+        var json = $"{{\"data\":{{\"node\":{{\"id\":\"{g}\",\"folderId\":\"{g}\"}}}}}}";
+
+        var services = new ServiceCollection();
+        services.AddSitecoreGraphQL(o =>
+        {
+            o.Endpoint = "http://cm/graphql";
+            o.ClientId = "id";
+            o.ClientSecret = "secret";
+            o.AllowInsecureHttp = true;
+            o.EnableUnauthorizedRefresh = false;
+        });
+
+        var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
+        tokenService
+            .Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(default(SitecoreAuthToken));
+        services.AddSingleton(tokenService.Object);
+
+        var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
+        accessor.Setup(a => a.GetAccessToken(It.IsAny<SitecoreAuthToken>())).Returns("tkn");
+        services.AddSingleton(accessor.Object);
+
+        services.AddHttpClient(SitecoreGraphQLFactory.NamedHttpClient)
+            .ConfigurePrimaryHttpMessageHandler(() => new StubPrimaryHandler(json));
+
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<ISitecoreGraphQLFactory>();
+        var client = await factory.CreateClientAsync();
+
+        var result = await client.SendQueryAsync<RootResponse>(new GraphQLRequest { Query = "query { node { id } }" });
+        result.Data.Node.Id.ShouldBe(g);
     }
 }

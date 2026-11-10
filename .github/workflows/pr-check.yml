@@ -1,5 +1,5 @@
 # PR Check Workflow for Sitecore.API.Foundation.GraphQL
-# Builds and tests the library on pull requests across .NET SDK 8, 9, and 10 using a matrix.
+# Lints GitHub workflows, builds, tests, enforces >= 80% coverage across .NET 8/9/10, and verifies NuGet packaging.
 
 name: PR Check
 
@@ -12,6 +12,26 @@ permissions:
   contents: read
 
 jobs:
+  lint-workflows:
+    name: Lint GitHub Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run actionlint
+        run: |
+          if command -v actionlint >/dev/null 2>&1; then
+            actionlint -color
+          else
+            TMP_DIR="$(mktemp -d)"
+            trap 'rm -rf "$TMP_DIR"' EXIT
+            bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7 "$TMP_DIR"
+            "$TMP_DIR/actionlint" -color
+          fi
+
   build-test:
     name: Build and Test (${{ matrix.tfm }})
     runs-on: ubuntu-latest
@@ -31,31 +51,113 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET ${{ matrix.dotnet }}
+      - name: Setup .NET SDKs
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ matrix.dotnet }}
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
 
-      - name: Restore library (${{ matrix.tfm }})
-        run: dotnet restore src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj -p:TargetFramework=${{ matrix.tfm }}
+      - name: Restore solution
+        run: dotnet restore Sitecore.API.Foundation.GraphQL.slnx
 
-      - name: Build library (${{ matrix.tfm }})
-        run: dotnet build src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
+      - name: Build solution (Release)
+        run: dotnet build Sitecore.API.Foundation.GraphQL.slnx --configuration Release --no-restore
 
-      - name: Restore tests (${{ matrix.tfm }})
-        run: dotnet restore tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj -p:TargetFramework=${{ matrix.tfm }}
-
-      - name: Build tests (${{ matrix.tfm }})
-        run: dotnet build tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj --configuration Release --no-restore -p:TargetFramework=${{ matrix.tfm }}
+      - name: Verify code formatting
+        if: matrix.tfm == 'net10.0'
+        run: dotnet format Sitecore.API.Foundation.GraphQL.slnx --verify-no-changes --no-restore
 
       - name: Test with coverage (${{ matrix.tfm }})
-        run: >
-          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj
-          --configuration Release
-          --no-build --no-restore
-          --framework ${{ matrix.tfm }}
-          --collect:"XPlat Code Coverage"
-          --results-directory ./TestResults/${{ matrix.tfm }}
+        run: |
+          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --framework ${{ matrix.tfm }} \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults/${{ matrix.tfm }}
+
+      - name: Verify >= 80% line coverage (${{ matrix.tfm }})
+        run: |
+          python3 - "${{ matrix.tfm }}" <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+
+          tfm = sys.argv[1]
+          files = glob.glob(f"./TestResults/{tfm}/**/coverage.cobertura.xml", recursive=True)
+          if not files:
+              raise SystemExit(f"No coverage.cobertura.xml found under ./TestResults/{tfm}")
+
+          tree = ET.parse(files[0])
+          pkg = tree.find(".//package[@name='Sitecore.API.Foundation.GraphQL']")
+          if pkg is None:
+              raise SystemExit("Package Sitecore.API.Foundation.GraphQL not found in coverage report.")
+
+          line_rate = float(pkg.attrib["line-rate"])
+          public_prefixes = (
+              "Sitecore.API.Foundation.GraphQL.SitecoreGraphQLFactory",
+              "Sitecore.API.Foundation.GraphQL.SitecoreGraphQLOptions",
+              "Sitecore.API.Foundation.GraphQL.SitecoreGraphQLClientOptions",
+              "Sitecore.API.Foundation.GraphQL.SitecoreGraphQLDiagnostics",
+              "Sitecore.API.Foundation.GraphQL.Http.SitecoreTokenHandler",
+              "Sitecore.API.Foundation.GraphQL.DependencyInjection.ServiceCollectionExtensions",
+          )
+          pub_valid = 0
+          pub_covered = 0
+          for cls in pkg.findall(".//class"):
+              name = cls.attrib.get("name", "")
+              if name.startswith(public_prefixes):
+                  for line in cls.findall("./lines/line"):
+                      pub_valid += 1
+                      if int(line.attrib.get("hits", "0")) > 0:
+                          pub_covered += 1
+
+          pub_rate = (pub_covered / pub_valid) if pub_valid else 1.0
+          print(f"[{tfm}] Overall line coverage: {line_rate:.2%}; Public API line coverage: {pub_rate:.2%} ({pub_covered}/{pub_valid})")
+          if line_rate < 0.80:
+              raise SystemExit(f"Overall line coverage {line_rate:.2%} is below 80% threshold.")
+          if pub_rate < 0.80:
+              raise SystemExit(f"Public API line coverage {pub_rate:.2%} is below 80% threshold.")
+          PY
+
+      - name: Pack and verify NuGet & symbol packages
+        if: matrix.tfm == 'net10.0'
+        run: |
+          dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./nupkgs
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET, zipfile
+
+          nupkgs = glob.glob("./nupkgs/SitecoreAPIGraphQLClient.*.nupkg")
+          snupkgs = glob.glob("./nupkgs/SitecoreAPIGraphQLClient.*.snupkg")
+          assert nupkgs, "Expected .nupkg output in ./nupkgs"
+          assert snupkgs, "Expected .snupkg output in ./nupkgs"
+
+          expected = {
+              "GraphQL.Client",
+              "GraphQL.Client.Abstractions",
+              "GraphQL.Client.Serializer.Newtonsoft",
+              "Microsoft.Extensions.Http",
+              "Microsoft.Extensions.Http.Resilience",
+              "Microsoft.Extensions.Logging.Abstractions",
+              "Microsoft.Extensions.Options",
+              "Microsoft.Extensions.Options.ConfigurationExtensions",
+              "SitecoreAPIAuthorization",
+          }
+
+          with zipfile.ZipFile(nupkgs[0]) as zf:
+              nuspec_name = [n for n in zf.namelist() if n.endswith(".nuspec")][0]
+              root = ET.fromstring(zf.read(nuspec_name))
+              ns = {"nu": root.tag.split("}")[0].strip("{")}
+              for group in root.findall(".//nu:dependencies/nu:group", ns):
+                  tf = group.attrib.get("targetFramework")
+                  deps = {d.attrib["id"] for d in group.findall("nu:dependency", ns)}
+                  if deps != expected:
+                      raise SystemExit(f"Unexpected dependencies for {tf}: {sorted(deps)} != {sorted(expected)}")
+          print("Verified .nupkg, .snupkg, and exact 9 runtime dependencies per TFM.")
+          PY
 
       - name: Upload test results (${{ matrix.tfm }})
         uses: actions/upload-artifact@v4
@@ -63,5 +165,3 @@ jobs:
         with:
           name: testresults-${{ matrix.tfm }}
           path: ./TestResults/${{ matrix.tfm }}
-
-# End of workflow file

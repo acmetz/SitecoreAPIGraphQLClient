@@ -52,14 +52,14 @@ public class VariablesShapeTests
 
         services.AddSitecoreGraphQL(o =>
         {
-            o.Endpoint = "http://unit.test/graphql";
+            o.Endpoint = "https://unit.test/graphql";
             o.ClientId = "id";
             o.ClientSecret = "secret";
             o.EnableUnauthorizedRefresh = false;
         });
 
         var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
+        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(default(SitecoreAuthToken));
         services.AddSingleton(tokenService.Object);
         services.AddSingleton(Mock.Of<ITokenValueAccessor>());
