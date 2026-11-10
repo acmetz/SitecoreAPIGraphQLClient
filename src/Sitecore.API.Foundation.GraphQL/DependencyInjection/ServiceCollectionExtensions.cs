@@ -105,6 +105,8 @@ public static class ServiceCollectionExtensions
             var gate = new object();
             SitecoreGraphQLOptions? cachedBefore = null;
             SitecoreGraphQLOptions? cachedAfter = null;
+            var cachedAssignedMask = GraphQLOptionsAssignedMask.None;
+            Dictionary<string, GraphQLClientOptionsAssignedMask>? cachedClientMasks = null;
 
             optionsBuilder.Configure(target =>
             {
@@ -113,13 +115,17 @@ public static class ServiceCollectionExtensions
                     if (cachedAfter is null)
                     {
                         var before = CloneOptions(target);
+                        var initialClients = CaptureClientReferences(target.Clients);
+                        target.ResetAssignmentTracking();
                         configure(target);
                         cachedBefore = before;
+                        cachedAssignedMask = target.AssignedMask;
+                        cachedClientMasks = CaptureClientMasks(target.Clients, initialClients);
                         cachedAfter = CloneOptions(target);
                         return;
                     }
 
-                    ApplyConfiguredChanges(cachedBefore!, cachedAfter, target);
+                    ApplyConfiguredChanges(cachedBefore!, cachedAfter, cachedAssignedMask, cachedClientMasks, target);
                 }
             });
         }
@@ -303,57 +309,118 @@ public static class ServiceCollectionExtensions
             AllowPostRetries = source.AllowPostRetries
         };
 
+    private static Dictionary<string, SitecoreGraphQLClientOptions?>? CaptureClientReferences(
+        Dictionary<string, SitecoreGraphQLClientOptions>? clients)
+    {
+        if (clients is null)
+        {
+            return null;
+        }
+
+        var snapshot = new Dictionary<string, SitecoreGraphQLClientOptions?>(clients.Count, clients.Comparer);
+        foreach (var (name, clientOpts) in clients)
+        {
+            snapshot[name] = clientOpts;
+        }
+
+        return snapshot;
+    }
+
+    private static Dictionary<string, GraphQLClientOptionsAssignedMask>? CaptureClientMasks(
+        Dictionary<string, SitecoreGraphQLClientOptions>? liveClients,
+        Dictionary<string, SitecoreGraphQLClientOptions?>? initialClients)
+    {
+        if (liveClients is null)
+        {
+            return null;
+        }
+
+        var masks = new Dictionary<string, GraphQLClientOptionsAssignedMask>(liveClients.Count, liveClients.Comparer);
+        foreach (var (name, clientOpts) in liveClients)
+        {
+            if (clientOpts is null)
+            {
+                continue;
+            }
+
+            if (initialClients is not null &&
+                initialClients.TryGetValue(name, out var initialRef) &&
+                ReferenceEquals(initialRef, clientOpts))
+            {
+                masks[name] = clientOpts.AssignedMask;
+            }
+            else
+            {
+                masks[name] = GraphQLClientOptionsAssignedMask.All;
+            }
+        }
+
+        return masks;
+    }
+
     private static void ApplyConfiguredChanges(
         SitecoreGraphQLOptions before,
         SitecoreGraphQLOptions after,
+        GraphQLOptionsAssignedMask assignedMask,
+        Dictionary<string, GraphQLClientOptionsAssignedMask>? clientMasks,
         SitecoreGraphQLOptions target)
     {
-        if (!string.Equals(before.Endpoint, after.Endpoint, StringComparison.Ordinal))
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.Endpoint) ||
+            !string.Equals(before.Endpoint, after.Endpoint, StringComparison.Ordinal))
         {
             target.Endpoint = after.Endpoint;
         }
 
-        if (!string.Equals(before.ClientId, after.ClientId, StringComparison.Ordinal))
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.ClientId) ||
+            !string.Equals(before.ClientId, after.ClientId, StringComparison.Ordinal))
         {
             target.ClientId = after.ClientId;
         }
 
-        if (!string.Equals(before.ClientSecret, after.ClientSecret, StringComparison.Ordinal))
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.ClientSecret) ||
+            !string.Equals(before.ClientSecret, after.ClientSecret, StringComparison.Ordinal))
         {
             target.ClientSecret = after.ClientSecret;
         }
 
-        if (before.EnableUnauthorizedRefresh != after.EnableUnauthorizedRefresh)
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.EnableUnauthorizedRefresh) ||
+            before.EnableUnauthorizedRefresh != after.EnableUnauthorizedRefresh)
         {
             target.EnableUnauthorizedRefresh = after.EnableUnauthorizedRefresh;
         }
 
-        if (before.MaxUnauthorizedRetries != after.MaxUnauthorizedRetries)
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.MaxUnauthorizedRetries) ||
+            before.MaxUnauthorizedRetries != after.MaxUnauthorizedRetries)
         {
             target.MaxUnauthorizedRetries = after.MaxUnauthorizedRetries;
         }
 
-        if (before.EnableInternalLoggingSetup != after.EnableInternalLoggingSetup)
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.EnableInternalLoggingSetup) ||
+            before.EnableInternalLoggingSetup != after.EnableInternalLoggingSetup)
         {
             target.EnableInternalLoggingSetup = after.EnableInternalLoggingSetup;
         }
 
-        if (before.AllowInsecureHttp != after.AllowInsecureHttp)
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.AllowInsecureHttp) ||
+            before.AllowInsecureHttp != after.AllowInsecureHttp)
         {
             target.AllowInsecureHttp = after.AllowInsecureHttp;
         }
 
-        if (before.AllowPostRetries != after.AllowPostRetries)
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.AllowPostRetries) ||
+            before.AllowPostRetries != after.AllowPostRetries)
         {
             target.AllowPostRetries = after.AllowPostRetries;
         }
 
-        if (before.MaxCachedClients != after.MaxCachedClients)
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.MaxCachedClients) ||
+            before.MaxCachedClients != after.MaxCachedClients)
         {
             target.MaxCachedClients = after.MaxCachedClients;
         }
 
-        if (before.MaxRetryBufferBytes != after.MaxRetryBufferBytes)
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.MaxRetryBufferBytes) ||
+            before.MaxRetryBufferBytes != after.MaxRetryBufferBytes)
         {
             target.MaxRetryBufferBytes = after.MaxRetryBufferBytes;
         }
@@ -364,7 +431,32 @@ public static class ServiceCollectionExtensions
             return;
         }
 
-        target.Clients ??= new Dictionary<string, SitecoreGraphQLClientOptions>(after.Clients.Comparer);
+        if (assignedMask.HasFlag(GraphQLOptionsAssignedMask.Clients))
+        {
+            var replaced = new Dictionary<string, SitecoreGraphQLClientOptions>(after.Clients.Count, after.Clients.Comparer);
+            foreach (var (name, afterClient) in after.Clients)
+            {
+                replaced[name] = afterClient is null ? null! : CloneClientOptions(afterClient);
+            }
+
+            target.Clients = replaced;
+            return;
+        }
+
+        if (target.Clients is null)
+        {
+            target.Clients = new Dictionary<string, SitecoreGraphQLClientOptions>(after.Clients.Comparer);
+        }
+        else if (!Equals(target.Clients.Comparer, after.Clients.Comparer))
+        {
+            var rebuilt = new Dictionary<string, SitecoreGraphQLClientOptions>(target.Clients.Count, after.Clients.Comparer);
+            foreach (var (name, existingClient) in target.Clients)
+            {
+                rebuilt[name] = existingClient;
+            }
+
+            target.Clients = rebuilt;
+        }
 
         if (before.Clients is not null)
         {
@@ -385,13 +477,18 @@ public static class ServiceCollectionExtensions
                 continue;
             }
 
-            if (before.Clients is not null &&
+            var clientMask = clientMasks is not null && clientMasks.TryGetValue(name, out var recordedMask)
+                ? recordedMask
+                : GraphQLClientOptionsAssignedMask.None;
+
+            if (clientMask != GraphQLClientOptionsAssignedMask.All &&
+                before.Clients is not null &&
                 before.Clients.TryGetValue(name, out var beforeClient) &&
                 beforeClient is not null &&
                 target.Clients.TryGetValue(name, out var targetClient) &&
                 targetClient is not null)
             {
-                ApplyClientChanges(beforeClient, afterClient, targetClient);
+                ApplyClientChanges(beforeClient, afterClient, clientMask, targetClient);
             }
             else
             {
@@ -403,29 +500,35 @@ public static class ServiceCollectionExtensions
     private static void ApplyClientChanges(
         SitecoreGraphQLClientOptions before,
         SitecoreGraphQLClientOptions after,
+        GraphQLClientOptionsAssignedMask assignedMask,
         SitecoreGraphQLClientOptions target)
     {
-        if (!string.Equals(before.Endpoint, after.Endpoint, StringComparison.Ordinal))
+        if (assignedMask.HasFlag(GraphQLClientOptionsAssignedMask.Endpoint) ||
+            !string.Equals(before.Endpoint, after.Endpoint, StringComparison.Ordinal))
         {
             target.Endpoint = after.Endpoint;
         }
 
-        if (!string.Equals(before.ClientId, after.ClientId, StringComparison.Ordinal))
+        if (assignedMask.HasFlag(GraphQLClientOptionsAssignedMask.ClientId) ||
+            !string.Equals(before.ClientId, after.ClientId, StringComparison.Ordinal))
         {
             target.ClientId = after.ClientId;
         }
 
-        if (!string.Equals(before.ClientSecret, after.ClientSecret, StringComparison.Ordinal))
+        if (assignedMask.HasFlag(GraphQLClientOptionsAssignedMask.ClientSecret) ||
+            !string.Equals(before.ClientSecret, after.ClientSecret, StringComparison.Ordinal))
         {
             target.ClientSecret = after.ClientSecret;
         }
 
-        if (before.AllowInsecureHttp != after.AllowInsecureHttp)
+        if (assignedMask.HasFlag(GraphQLClientOptionsAssignedMask.AllowInsecureHttp) ||
+            before.AllowInsecureHttp != after.AllowInsecureHttp)
         {
             target.AllowInsecureHttp = after.AllowInsecureHttp;
         }
 
-        if (before.AllowPostRetries != after.AllowPostRetries)
+        if (assignedMask.HasFlag(GraphQLClientOptionsAssignedMask.AllowPostRetries) ||
+            before.AllowPostRetries != after.AllowPostRetries)
         {
             target.AllowPostRetries = after.AllowPostRetries;
         }

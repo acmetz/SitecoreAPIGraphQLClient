@@ -196,8 +196,11 @@ public class GitHubWorkflowTests
         File.Exists(readmePath).ShouldBeTrue();
 
         var readmeContent = File.ReadAllText(readmePath);
-        var linkMatches = Regex.Matches(readmeContent, @"\[[^\]]+\]\(([^)]+)\)");
-        linkMatches.ShouldNotBeEmpty();
+        readmeContent.EndsWith('\n').ShouldBeTrue("README.md should end with a trailing newline per .editorconfig.");
+
+        var markdownWithoutFencedCode = Regex.Replace(readmeContent, @"```[\s\S]*?```", string.Empty);
+        var linkMatches = Regex.Matches(markdownWithoutFencedCode, @"\]\(([^)]+)\)");
+        linkMatches.Count.ShouldBeGreaterThanOrEqualTo(10);
 
         foreach (Match match in linkMatches)
         {

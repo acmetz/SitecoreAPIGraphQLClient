@@ -278,6 +278,151 @@ public class DependencyInjectionOverloadTests
         preservedOpts.ClientSecret.ShouldBe("null-delegate-secret");
     }
 
+    [Fact]
+    public async Task AddSitecoreGraphQL_delegate_preserves_custom_Clients_comparer_reload_overrides_and_PostConfigure()
+    {
+        // 1) Custom StringComparer.OrdinalIgnoreCase dictionary assigned in configure must hold across both IOptions<T> and IOptionsMonitor<T> / ISitecoreGraphQLFactory
+        var comparerCalls = 0;
+        var comparerServices = new ServiceCollection();
+        comparerServices.Configure<SitecoreGraphQLOptions>(prior =>
+        {
+            prior.Clients["stale"] = new SitecoreGraphQLClientOptions
+            {
+                Endpoint = "https://stale.sitecore/graphql",
+                ClientId = "stale-id",
+                ClientSecret = "stale-secret"
+            };
+        });
+        comparerServices.AddSitecoreGraphQL(o =>
+        {
+            comparerCalls++;
+            o.Clients = new Dictionary<string, SitecoreGraphQLClientOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Delivery"] = new SitecoreGraphQLClientOptions
+                {
+                    Endpoint = "https://edge.sitecorecloud.io/api/graphql/v1",
+                    ClientId = "delivery-id",
+                    ClientSecret = "delivery-secret"
+                }
+            };
+        });
+        comparerServices.AddSingleton(Mock.Of<ISitecoreTokenService>());
+
+        using (var comparerProvider = comparerServices.BuildServiceProvider())
+        {
+            var staticOpts = comparerProvider.GetRequiredService<IOptions<SitecoreGraphQLOptions>>().Value;
+            staticOpts.Clients.ContainsKey("delivery").ShouldBeTrue();
+            staticOpts.Clients.ContainsKey("stale").ShouldBeFalse();
+
+            var factory = comparerProvider.GetRequiredService<ISitecoreGraphQLFactory>();
+            var lowerCaseClient = await factory.CreateClientByNameAsync("delivery");
+            lowerCaseClient.ShouldNotBeNull();
+            comparerCalls.ShouldBe(1);
+        }
+
+        // 2) Reloadable IConfiguration before AddSitecoreGraphQL + explicit code hardening matching initial defaults + PostConfigure after AddSitecoreGraphQL
+        var reloadSource = new ReloadableConfigSource(new Dictionary<string, string?>
+        {
+            ["Sitecore:GraphQL:Endpoint"] = "https://v1.sitecore/graphql",
+            ["Sitecore:GraphQL:ClientId"] = "cfg-id",
+            ["Sitecore:GraphQL:ClientSecret"] = "cfg-secret-v1",
+            ["Sitecore:GraphQL:AllowInsecureHttp"] = "false",
+            ["Sitecore:GraphQL:Clients:authoring:Endpoint"] = "https://authoring-v1.sitecore/graphql",
+            ["Sitecore:GraphQL:Clients:authoring:AllowPostRetries"] = "false"
+        });
+        var configuration = new ConfigurationBuilder().Add(reloadSource).Build();
+
+        var reloadDelegateCalls = 0;
+        var reloadServices = new ServiceCollection();
+        reloadServices.Configure<SitecoreGraphQLOptions>(configuration.GetSection("Sitecore:GraphQL"));
+        reloadServices.AddSitecoreGraphQL(o =>
+        {
+            reloadDelegateCalls++;
+
+            // Explicit security assignments equal to initial config values must still override later hot-reloads
+            o.AllowInsecureHttp = false;
+            o.ClientSecret = "code-pinned-secret";
+            o.Clients["authoring"].AllowPostRetries = false;
+        });
+        reloadServices.PostConfigure<SitecoreGraphQLOptions>(post =>
+        {
+            post.MaxCachedClients = 32;
+        });
+        reloadServices.AddSingleton(Mock.Of<ISitecoreTokenService>());
+
+        using (var reloadProvider = reloadServices.BuildServiceProvider())
+        {
+            var monitor = reloadProvider.GetRequiredService<IOptionsMonitor<SitecoreGraphQLOptions>>();
+            var initial = monitor.CurrentValue;
+            initial.Endpoint.ShouldBe("https://v1.sitecore/graphql");
+            initial.ClientSecret.ShouldBe("code-pinned-secret");
+            initial.AllowInsecureHttp.ShouldBeFalse();
+            initial.MaxCachedClients.ShouldBe(32);
+            initial.Clients["authoring"].Endpoint.ShouldBe("https://authoring-v1.sitecore/graphql");
+            initial.Clients["authoring"].AllowPostRetries.ShouldBe(false);
+            reloadDelegateCalls.ShouldBe(1);
+
+            reloadSource.Reload(new Dictionary<string, string?>
+            {
+                ["Sitecore:GraphQL:Endpoint"] = "https://v2.sitecore/graphql",
+                ["Sitecore:GraphQL:ClientId"] = "cfg-id-v2",
+                ["Sitecore:GraphQL:ClientSecret"] = "cfg-secret-v2",
+                ["Sitecore:GraphQL:AllowInsecureHttp"] = "true",
+                ["Sitecore:GraphQL:Clients:authoring:Endpoint"] = "https://authoring-v2.sitecore/graphql",
+                ["Sitecore:GraphQL:Clients:authoring:AllowPostRetries"] = "true"
+            });
+
+            var reloaded = monitor.CurrentValue;
+            reloadDelegateCalls.ShouldBe(1);
+            reloaded.Endpoint.ShouldBe("https://v2.sitecore/graphql");
+            reloaded.ClientId.ShouldBe("cfg-id-v2");
+            reloaded.ClientSecret.ShouldBe("code-pinned-secret");
+            reloaded.AllowInsecureHttp.ShouldBeFalse();
+            reloaded.MaxCachedClients.ShouldBe(32);
+            reloaded.Clients["authoring"].Endpoint.ShouldBe("https://authoring-v2.sitecore/graphql");
+            reloaded.Clients["authoring"].AllowPostRetries.ShouldBe(false);
+        }
+
+        // 3) Setting o.Clients = null! in configure is preserved across resolutions
+        var nullClientsServices = new ServiceCollection();
+        nullClientsServices.AddSitecoreGraphQL(o =>
+        {
+            o.Endpoint = "https://unit.sitecore/graphql";
+            o.ClientId = "id";
+            o.ClientSecret = "secret";
+            o.Clients = null!;
+        });
+        nullClientsServices.AddSingleton(Mock.Of<ISitecoreTokenService>());
+
+        using var nullClientsProvider = nullClientsServices.BuildServiceProvider();
+        nullClientsProvider.GetRequiredService<IOptions<SitecoreGraphQLOptions>>().Value.Clients.ShouldBeNull();
+        nullClientsProvider.GetRequiredService<IOptionsMonitor<SitecoreGraphQLOptions>>().CurrentValue.Clients.ShouldBeNull();
+    }
+
+    private sealed class ReloadableConfigSource : IConfigurationSource
+    {
+        private readonly ReloadableConfigProvider _provider;
+
+        public ReloadableConfigSource(IDictionary<string, string?> initialData)
+            => _provider = new ReloadableConfigProvider(initialData);
+
+        public IConfigurationProvider Build(IConfigurationBuilder builder) => _provider;
+
+        public void Reload(IDictionary<string, string?> newData) => _provider.Update(newData);
+    }
+
+    private sealed class ReloadableConfigProvider : ConfigurationProvider
+    {
+        public ReloadableConfigProvider(IDictionary<string, string?> initialData)
+            => Data = new Dictionary<string, string?>(initialData, StringComparer.OrdinalIgnoreCase);
+
+        public void Update(IDictionary<string, string?> newData)
+        {
+            Data = new Dictionary<string, string?>(newData, StringComparer.OrdinalIgnoreCase);
+            OnReload();
+        }
+    }
+
     private sealed class StubOkHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

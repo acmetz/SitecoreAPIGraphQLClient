@@ -1503,9 +1503,25 @@ public class SecurityAndResilienceTests
             (await resp.Content.ReadAsStringAsync()).ShouldContain("\"ok\":true");
         }
 
-        wirePayloads.ToArray().ShouldBe([knownPayload, unknownPayload]);
+        // 3) Oversized unknown-length StreamContent (> MaxRetryBufferBytes, uses PrefixedRemainingStream) on 200 OK:
+        // full prefix + unread tail is transmitted intact and response streams cleanly
+        var oversizedPayload = "{\"query\":\"" + new string('x', 5000) + "\"}";
+        var oversizedBytes = Encoding.UTF8.GetBytes(oversizedPayload);
+        var oversizedOkStream = new NonSeekableReadStream(oversizedBytes);
+        using (var oversizedOkReq = new HttpRequestMessage(HttpMethod.Post, "https://edge.sitecorecloud.io/api/graphql/v1")
+        {
+            Content = new StreamContent(oversizedOkStream)
+        })
+        {
+            using var resp = await gqlClient.HttpClient.SendAsync(oversizedOkReq, HttpCompletionOption.ResponseHeadersRead);
+            resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+            (await resp.Content.ReadAsStringAsync()).ShouldContain("\"ok\":true");
+        }
 
-        // 3) Transport fault: forwardedRequest is disposed while caller-owned Content is detached and remains undisposed
+        oversizedOkStream.IsDisposed.ShouldBeTrue();
+        wirePayloads.ToArray().ShouldBe([knownPayload, unknownPayload, oversizedPayload]);
+
+        // 4) Transport fault with caller-owned StringContent: forwardedRequest is disposed while caller Content is detached and remains undisposed
         shouldFault = true;
         const string faultPayload = "{\"query\":\"{ fault }\"}";
         using var faultReq = new HttpRequestMessage(HttpMethod.Post, "https://edge.sitecorecloud.io/api/graphql/v1")
@@ -1517,6 +1533,22 @@ public class SecurityAndResilienceTests
             await gqlClient.HttpClient.SendAsync(faultReq, HttpCompletionOption.ResponseHeadersRead));
 
         (await faultReq.Content.ReadAsStringAsync()).ShouldBe(faultPayload);
+
+        // 5) Transport fault mid-stream with oversized unknown-length StreamContent (> MaxRetryBufferBytes, PrefixedRemainingStream):
+        // faulted forwardedRequest disposes PrefixedRemainingStream, its _tail stream, and _originalContent without leaking
+        var oversizedFaultStream = new NonSeekableReadStream(oversizedBytes);
+        var oversizedFaultContent = new TrackingStreamContent(oversizedFaultStream);
+        var oversizedFaultReq = new HttpRequestMessage(HttpMethod.Post, "https://edge.sitecorecloud.io/api/graphql/v1")
+        {
+            Content = oversizedFaultContent
+        };
+
+        await Should.ThrowAsync<HttpRequestException>(async () =>
+            await gqlClient.HttpClient.SendAsync(oversizedFaultReq, HttpCompletionOption.ResponseHeadersRead));
+
+        oversizedFaultStream.IsDisposed.ShouldBeTrue();
+        oversizedFaultContent.IsDisposed.ShouldBeTrue();
+        oversizedFaultReq.Dispose();
     }
 
     private static SitecoreGraphQLOptions CreateHotReloadSnapshot(int version)
@@ -1611,12 +1643,34 @@ public class SecurityAndResilienceTests
         }
     }
 
+    private sealed class TrackingStreamContent : StreamContent
+    {
+        public TrackingStreamContent(Stream content)
+            : base(content)
+        {
+        }
+
+        public bool IsDisposed { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                IsDisposed = true;
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
     private sealed class NonSeekableReadStream : Stream
     {
         private readonly byte[] _data;
         private int _offset;
 
         public NonSeekableReadStream(byte[] data) => _data = data;
+
+        public bool IsDisposed { get; private set; }
 
         public override bool CanRead => true;
 
@@ -1654,6 +1708,16 @@ public class SecurityAndResilienceTests
         public override void SetLength(long value) => throw new NotSupportedException();
 
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                IsDisposed = true;
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class AsyncDisposableTokenService : ISitecoreTokenService, IAsyncDisposable

@@ -65,6 +65,10 @@ jobs:
       - name: Build solution (Release)
         run: dotnet build Sitecore.API.Foundation.GraphQL.slnx --configuration Release --no-restore
 
+      - name: Verify code formatting
+        if: matrix.tfm == 'net10.0'
+        run: dotnet format Sitecore.API.Foundation.GraphQL.slnx --verify-no-changes --no-restore
+
       - name: Test with coverage (${{ matrix.tfm }})
         run: |
           dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
