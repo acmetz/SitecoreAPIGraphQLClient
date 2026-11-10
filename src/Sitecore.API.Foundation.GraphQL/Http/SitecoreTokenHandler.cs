@@ -1,5 +1,7 @@
+using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sitecore.API.Foundation.Authorization.Abstractions;
 using Sitecore.API.Foundation.Authorization.Models;
@@ -8,139 +10,286 @@ using Sitecore.API.Foundation.GraphQL.Internal;
 namespace Sitecore.API.Foundation.GraphQL.Http;
 
 /// <summary>
-/// DelegatingHandler that injects a bearer token for Sitecore GraphQL requests and supports refresh on 401 responses.
+/// <see cref="DelegatingHandler"/> that injects OAuth2 bearer tokens per Sitecore GraphQL request
+/// and supports coalesced token refresh with <c>HTTP POST</c> payload replay on <c>401 Unauthorized</c> responses.
 /// </summary>
 public sealed class SitecoreTokenHandler : DelegatingHandler
 {
-    private readonly ISitecoreTokenService _tokenService;
-    private readonly IOptions<SitecoreGraphQLOptions> _options;
-    private readonly ITokenValueAccessor _tokenAccessor;
-    private readonly ILogger<SitecoreTokenHandler>? _logger;
-
-    private volatile string? _cachedToken;
-    private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private readonly ISitecoreTokenCoordinator _coordinator;
+    private readonly IOptionsMonitor<SitecoreGraphQLOptions>? _optionsMonitor;
+    private readonly IOptions<SitecoreGraphQLOptions>? _staticOptions;
+    private readonly TimeProvider _timeProvider;
+    private readonly ILogger _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SitecoreTokenHandler"/> class.
     /// </summary>
+    /// <param name="tokenService">The Sitecore authentication token service.</param>
+    /// <param name="options">Configured Sitecore GraphQL options.</param>
+    /// <param name="tokenAccessor">Accessor for extracting bearer token strings.</param>
+    /// <param name="logger">Optional logger instance.</param>
     public SitecoreTokenHandler(
         ISitecoreTokenService tokenService,
         IOptions<SitecoreGraphQLOptions> options,
         ITokenValueAccessor tokenAccessor,
         ILogger<SitecoreTokenHandler>? logger = null)
     {
-        _tokenService = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
-        _options = options ?? throw new ArgumentNullException(nameof(options));
-        _tokenAccessor = tokenAccessor ?? throw new ArgumentNullException(nameof(tokenAccessor));
-        _logger = logger;
+        ArgumentNullException.ThrowIfNull(tokenService);
+        _staticOptions = options ?? throw new ArgumentNullException(nameof(options));
+        ArgumentNullException.ThrowIfNull(tokenAccessor);
+        _coordinator = new SitecoreTokenCoordinator(tokenService, tokenAccessor);
+        _timeProvider = TimeProvider.System;
+        _logger = (ILogger?)logger ?? NullLogger<SitecoreTokenHandler>.Instance;
     }
+
+    internal SitecoreTokenHandler(
+        ISitecoreTokenCoordinator coordinator,
+        IOptionsMonitor<SitecoreGraphQLOptions> optionsMonitor,
+        TimeProvider? timeProvider = null,
+        ILogger<SitecoreTokenHandler>? logger = null)
+    {
+        _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
+        _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _logger = (ILogger?)logger ?? NullLogger<SitecoreTokenHandler>.Instance;
+    }
+
+    private SitecoreGraphQLOptions CurrentOptions
+        => _optionsMonitor?.CurrentValue ?? _staticOptions!.Value;
 
     /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        await EnsureTokenAsync(cancellationToken).ConfigureAwait(false);
-        AttachAuthorizationHeaderIfPresent(request);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var opts = CurrentOptions;
+        SitecoreAuthClientCredentials credentials;
+        string? clientName = null;
+        string sanitizedEndpoint;
+        bool allowPostRetries;
+
+        if (request.Options.TryGetValue(CredentialContext.OptionsKey, out var credentialContext))
+        {
+            credentials = credentialContext.Credentials;
+            clientName = credentialContext.ClientName;
+            sanitizedEndpoint = credentialContext.SanitizedEndpoint;
+            allowPostRetries = credentialContext.AllowPostRetries;
+        }
+        else if (opts.TryBuildCredentials(out var defaultCredentials))
+        {
+            credentials = defaultCredentials;
+            sanitizedEndpoint = EndpointUriValidator.SanitizeForLogging(request.RequestUri?.OriginalString);
+            allowPostRetries = opts.AllowPostRetries;
+        }
+        else
+        {
+            Log.HandlerMissingCredentials(_logger);
+            return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+
+        var (authToken, accessToken) = await _coordinator.GetTokenAsync(credentials, clientName, cancellationToken).ConfigureAwait(false);
+        AttachAuthorizationHeader(request, accessToken);
+
+        var maxRetries = opts.EnableUnauthorizedRefresh ? Math.Max(0, opts.MaxUnauthorizedRetries) : 0;
+        var canReplayContent = await TryBufferContentIfNeededAsync(
+            request,
+            shouldBuffer: maxRetries > 0 || allowPostRetries,
+            opts.MaxRetryBufferBytes,
+            cancellationToken).ConfigureAwait(false);
 
         var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        if (!ShouldAttemptRefresh(response))
+        if (response.StatusCode != HttpStatusCode.Unauthorized || maxRetries == 0)
         {
             return response;
         }
 
-        return await RefreshAndRetryOnUnauthorizedAsync(request, response, cancellationToken).ConfigureAwait(false);
+        if (!canReplayContent)
+        {
+            Log.UnauthorizedRetrySkippedUnbufferedPayload(_logger, sanitizedEndpoint, opts.MaxRetryBufferBytes);
+            return response;
+        }
+
+        return await RefreshAndRetryOnUnauthorizedAsync(
+            request,
+            response,
+            credentials,
+            authToken,
+            accessToken,
+            clientName,
+            sanitizedEndpoint,
+            maxRetries,
+            cancellationToken).ConfigureAwait(false);
     }
 
-    private void AttachAuthorizationHeaderIfPresent(HttpRequestMessage request)
+    /// <summary>
+    /// Forces a token refresh for the configured default Sitecore GraphQL client credentials.
+    /// </summary>
+    /// <param name="cancellationToken">A token to observe while waiting for the refresh to complete.</param>
+    /// <returns>A task representing the asynchronous refresh operation.</returns>
+    public async Task ForceRefreshAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(_cachedToken)) return;
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _cachedToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var opts = CurrentOptions;
+        if (!opts.TryBuildCredentials(out var credentials))
+        {
+            Log.HandlerMissingCredentials(_logger);
+            return;
+        }
+
+        _ = await _coordinator.RefreshTokenAsync(
+            credentials,
+            failedAuthToken: null,
+            failedAccessToken: null,
+            clientName: null,
+            cancellationToken).ConfigureAwait(false);
     }
 
-    private bool ShouldAttemptRefresh(HttpResponseMessage response)
-        => response.StatusCode == System.Net.HttpStatusCode.Unauthorized && _options.Value.EnableUnauthorizedRefresh;
-
-    private async Task<HttpResponseMessage> RefreshAndRetryOnUnauthorizedAsync(HttpRequestMessage request, HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async ValueTask<bool> TryBufferContentIfNeededAsync(
+        HttpRequestMessage request,
+        bool shouldBuffer,
+        long maxBufferBytes,
+        CancellationToken cancellationToken)
     {
-        var maxRetries = Math.Max(0, _options.Value.MaxUnauthorizedRetries);
+        if (request.Content is null)
+        {
+            return true;
+        }
+
+        if (!shouldBuffer || maxBufferBytes <= 0)
+        {
+            return false;
+        }
+
+        var contentLength = request.Content.Headers.ContentLength;
+        if (contentLength.HasValue && contentLength.Value > maxBufferBytes)
+        {
+            return false;
+        }
+
+        try
+        {
+#if NET9_0_OR_GREATER
+            await request.Content.LoadIntoBufferAsync(maxBufferBytes, cancellationToken).ConfigureAwait(false);
+#else
+            cancellationToken.ThrowIfCancellationRequested();
+            await request.Content.LoadIntoBufferAsync(maxBufferBytes).ConfigureAwait(false);
+#endif
+            return true;
+        }
+        catch (HttpRequestException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    private async Task<HttpResponseMessage> RefreshAndRetryOnUnauthorizedAsync(
+        HttpRequestMessage originalRequest,
+        HttpResponseMessage response,
+        SitecoreAuthClientCredentials credentials,
+        SitecoreAuthToken currentAuthToken,
+        string currentAccessToken,
+        string? clientName,
+        string sanitizedEndpoint,
+        int maxRetries,
+        CancellationToken cancellationToken)
+    {
+        byte[]? payloadBytes = null;
+        if (originalRequest.Content is not null)
+        {
+            payloadBytes = await originalRequest.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var clientTag = SitecoreGraphQLDiagnostics.GetClientTag(clientName);
+
         for (var attempt = 0; attempt < maxRetries; attempt++)
         {
-            _logger?.LogDebug("401 received, attempting token refresh (attempt {Attempt}/{MaxRetries})", attempt + 1, maxRetries);
+            Log.UnauthorizedRefreshAttempt(_logger, sanitizedEndpoint, attempt + 1, maxRetries);
+            SitecoreGraphQLDiagnostics.AuthRetries.Add(1, new KeyValuePair<string, object?>("client.name", clientTag));
 
-            await ForceRefreshAsync(cancellationToken).ConfigureAwait(false);
-            AttachAuthorizationHeaderIfPresent(request);
+            (currentAuthToken, currentAccessToken) = await _coordinator.RefreshTokenAsync(
+                credentials,
+                currentAuthToken,
+                currentAccessToken,
+                clientName,
+                cancellationToken).ConfigureAwait(false);
 
             response.Dispose();
-            response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized)
+
+            using var retryRequest = CloneRequestForRetry(originalRequest, payloadBytes, currentAccessToken);
+            response = await base.SendAsync(retryRequest, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.Unauthorized)
             {
                 break;
             }
 
-            // Exponential backoff with jitter before next retry
             if (attempt < maxRetries - 1)
             {
                 var delay = ComputeBackoffDelay(attempt);
-                _logger?.LogTrace("Unauthorized persisted. Waiting {DelayMs}ms before next retry.", delay.TotalMilliseconds);
-                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                Log.UnauthorizedRetryBackoff(_logger, sanitizedEndpoint, delay.TotalMilliseconds);
+                await Task.Delay(delay, _timeProvider, cancellationToken).ConfigureAwait(false);
             }
         }
+
         return response;
     }
 
-    /// <inheritdoc />
-    protected override void Dispose(bool disposing)
+    private static HttpRequestMessage CloneRequestForRetry(
+        HttpRequestMessage originalRequest,
+        byte[]? payloadBytes,
+        string accessToken)
     {
-        if (disposing)
+        var clone = new HttpRequestMessage(originalRequest.Method, originalRequest.RequestUri)
         {
-            _refreshLock.Dispose();
+            Version = originalRequest.Version,
+            VersionPolicy = originalRequest.VersionPolicy
+        };
+
+        foreach (var header in originalRequest.Headers)
+        {
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
 
-        base.Dispose(disposing);
+        AttachAuthorizationHeader(clone, accessToken);
+
+        foreach (var option in originalRequest.Options)
+        {
+            clone.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), option.Value);
+        }
+
+        if (payloadBytes is not null)
+        {
+            var contentClone = new ReadOnlyMemoryContent(payloadBytes);
+            if (originalRequest.Content is not null)
+            {
+                foreach (var contentHeader in originalRequest.Content.Headers)
+                {
+                    contentClone.Headers.TryAddWithoutValidation(contentHeader.Key, contentHeader.Value);
+                }
+            }
+
+            clone.Content = contentClone;
+        }
+
+        return clone;
+    }
+
+    private static void AttachAuthorizationHeader(HttpRequestMessage request, string accessToken)
+    {
+        if (string.IsNullOrEmpty(accessToken))
+        {
+            request.Headers.Authorization = null;
+            return;
+        }
+
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
     }
 
     private static TimeSpan ComputeBackoffDelay(int attempt)
     {
-        // Base 200ms, exponential growth capped at 5s, with +/-20% jitter
         var baseMs = 200d * Math.Pow(2, attempt);
-        var jitter = 0.8 + Random.Shared.NextDouble() * 0.4; // 0.8 .. 1.2
+        var jitter = 0.8 + (Random.Shared.NextDouble() * 0.4);
         var ms = Math.Min(baseMs * jitter, 5000d);
         return TimeSpan.FromMilliseconds(ms);
-    }
-
-    private async Task EnsureTokenAsync(CancellationToken cancellationToken)
-    {
-        if (!string.IsNullOrEmpty(_cachedToken)) return;
-        await RefreshTokenInternalAsync(cancellationToken, force: false).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Forces token refresh.
-    /// </summary>
-    public Task ForceRefreshAsync(CancellationToken cancellationToken)
-        => RefreshTokenInternalAsync(cancellationToken, force: true);
-
-    private async Task RefreshTokenInternalAsync(CancellationToken cancellationToken, bool force)
-    {
-        if (!force && !string.IsNullOrEmpty(_cachedToken)) return;
-
-        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (!force && !string.IsNullOrEmpty(_cachedToken)) return;
-
-            if (!_options.Value.TryBuildCredentials(out var credentials))
-            {
-                _logger?.LogWarning("Sitecore GraphQL options missing ClientId/ClientSecret; token cannot be acquired.");
-                _cachedToken = null;
-                return;
-            }
-
-            var token = await _tokenService.GetSitecoreAuthToken(credentials).ConfigureAwait(false);
-            _cachedToken = _tokenAccessor.GetAccessToken(token);
-        }
-        finally
-        {
-            _refreshLock.Release();
-        }
     }
 }

@@ -40,7 +40,7 @@ public class GuidDeserializationTests
         // Minimal options via delegate
         services.AddSitecoreGraphQL(o =>
         {
-            o.Endpoint = "http://unit.test/graphql";
+            o.Endpoint = "https://unit.test/graphql";
             o.ClientId = "id";
             o.ClientSecret = "secret";
             o.EnableUnauthorizedRefresh = false; // keep handler behavior minimal
@@ -48,7 +48,7 @@ public class GuidDeserializationTests
 
         // Provide token service/accessor for handler
         var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
+        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(default(SitecoreAuthToken));
         services.AddSingleton(tokenService.Object);
 

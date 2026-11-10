@@ -37,7 +37,7 @@ public class TokenHandlerConfigTests
     {
         // Arrange
         var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
+        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(default(SitecoreAuthToken));
 
         var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
@@ -55,12 +55,12 @@ public class TokenHandlerConfigTests
         var client = new HttpClient(handler);
 
         // Act
-        var resp = await client.GetAsync("http://unit.test");
+        var resp = await client.GetAsync("https://unit.test");
 
         // Assert
         resp.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         inner.Calls.ShouldBe(1);
-        tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()), Times.Once);
+        tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public class TokenHandlerConfigTests
     {
         // Arrange
         var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
+        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(default(SitecoreAuthToken));
 
         var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
@@ -95,11 +95,11 @@ public class TokenHandlerConfigTests
         var client = new HttpClient(handler);
 
         // Act
-        var resp = await client.GetAsync("http://unit.test");
+        var resp = await client.GetAsync("https://unit.test");
 
         // Assert
         resp.StatusCode.ShouldBe(HttpStatusCode.OK);
         inner.Calls.ShouldBe(3); // initial + 2 retries
-        tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()), Times.Exactly(3));
+        tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 }

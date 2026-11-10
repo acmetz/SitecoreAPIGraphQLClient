@@ -37,7 +37,7 @@ public class TokenHandlerTests
     {
         // Arrange
         var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
+        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(default(SitecoreAuthToken));
 
         var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
@@ -55,14 +55,14 @@ public class TokenHandlerTests
         var client = new HttpClient(handler);
 
         // Act
-        var resp = await client.GetAsync("http://unit.test");
+        var resp = await client.GetAsync("https://unit.test");
 
         // Assert
         resp.StatusCode.ShouldBe(HttpStatusCode.OK);
         inner.LastAuth.ShouldNotBeNull();
         inner.LastAuth!.Scheme.ShouldBe("Bearer");
         inner.LastAuth!.Parameter.ShouldBe("abc");
-        tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()), Times.Once);
+        tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public class TokenHandlerTests
     {
         // Arrange
         var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
+        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(default(SitecoreAuthToken));
 
         var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
@@ -96,12 +96,12 @@ public class TokenHandlerTests
         var client = new HttpClient(handler);
 
         // Act
-        var resp = await client.GetAsync("http://unit.test");
+        var resp = await client.GetAsync("https://unit.test");
 
         // Assert
         resp.StatusCode.ShouldBe(HttpStatusCode.OK);
         inner.Calls.ShouldBe(2);
-        tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()), Times.Exactly(2));
+        tokenService.Verify(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public class TokenHandlerTests
         var client = new HttpClient(handler);
 
         // Act
-        var resp = await client.GetAsync("http://unit.test");
+        var resp = await client.GetAsync("https://unit.test");
 
         // Assert
         resp.StatusCode.ShouldBe(HttpStatusCode.OK);

@@ -43,7 +43,7 @@ public class CancellationTests
     {
         // Arrange
         var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
+        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(default(SitecoreAuthToken));
 
         var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
@@ -62,7 +62,7 @@ public class CancellationTests
         using var cts = new CancellationTokenSource();
 
         // Start request and wait until inner handler actually begins processing, then cancel
-        var sendTask = client.GetAsync("http://unit.test", cts.Token);
+        var sendTask = client.GetAsync("https://unit.test", cts.Token);
         await inner.Started.WaitAsync(TimeSpan.FromSeconds(2));
         cts.Cancel();
 
@@ -76,7 +76,7 @@ public class CancellationTests
     {
         // Arrange
         var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
-        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>()))
+        tokenService.Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(default(SitecoreAuthToken));
 
         var accessor = new Mock<ITokenValueAccessor>(MockBehavior.Strict);
@@ -99,7 +99,7 @@ public class CancellationTests
         cts.CancelAfter(50); // less than initial backoff (200ms)
 
         // Act/Assert
-        await Should.ThrowAsync<TaskCanceledException>(async () => await client.GetAsync("http://unit.test", cts.Token));
+        await Should.ThrowAsync<TaskCanceledException>(async () => await client.GetAsync("https://unit.test", cts.Token));
 
         // Expect only two sends: initial + immediate retry before backoff; cancellation prevents further retries
         inner.Calls.ShouldBe(2);

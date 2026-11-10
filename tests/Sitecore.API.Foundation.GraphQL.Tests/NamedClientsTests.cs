@@ -14,6 +14,7 @@ using Sitecore.API.Foundation.GraphQL.Http;
 
 namespace Sitecore.API.Foundation.GraphQL.Tests;
 
+#pragma warning disable CS0618 // Intentionally exercising legacy ISitecoreTokenCache constructor path
 public class NamedClientsTests
 {
     [Fact]
@@ -92,3 +93,4 @@ public class NamedClientsTests
         }
     }
 }
+#pragma warning restore CS0618

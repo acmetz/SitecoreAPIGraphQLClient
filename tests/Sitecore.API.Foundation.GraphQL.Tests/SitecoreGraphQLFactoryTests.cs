@@ -9,6 +9,7 @@ using Sitecore.API.Foundation.Authorization.Abstractions;
 
 namespace Sitecore.API.Foundation.GraphQL.Tests;
 
+#pragma warning disable CS0618 // Intentionally exercising legacy ISitecoreTokenCache constructor path
 public class SitecoreGraphQLFactoryTests
 {
     [Fact]
@@ -254,3 +255,4 @@ public class SitecoreGraphQLFactoryTests
         await Should.ThrowAsync<InvalidOperationException>(async () => await factory.CreateClientAsync());
     }
 }
+#pragma warning restore CS0618
