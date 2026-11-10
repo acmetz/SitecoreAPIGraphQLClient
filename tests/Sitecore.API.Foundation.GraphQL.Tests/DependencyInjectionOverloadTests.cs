@@ -154,6 +154,130 @@ public class DependencyInjectionOverloadTests
         resilienceConfigured.ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task AddSitecoreGraphQL_delegate_preserves_prior_ConfigureOptions_and_invokes_delegate_once()
+    {
+        var configureCalls = 0;
+        var services = new ServiceCollection();
+
+        services.Configure<SitecoreGraphQLOptions>(prior =>
+        {
+            prior.Endpoint = "https://prior.sitecore/graphql";
+            prior.ClientId = "prior-client-id";
+            prior.ClientSecret = "prior-client-secret";
+            prior.AllowInsecureHttp = true;
+            prior.AllowPostRetries = true;
+            prior.EnableUnauthorizedRefresh = true;
+            prior.MaxUnauthorizedRetries = 4;
+            prior.MaxCachedClients = 256;
+            prior.MaxRetryBufferBytes = 4096;
+            prior.Clients["authoring"] = new SitecoreGraphQLClientOptions
+            {
+                Endpoint = "https://authoring.sitecore/graphql",
+                ClientId = "authoring-id",
+                ClientSecret = "authoring-old-secret",
+                AllowInsecureHttp = true,
+                AllowPostRetries = false
+            };
+            prior.Clients["obsolete"] = new SitecoreGraphQLClientOptions
+            {
+                Endpoint = "https://obsolete.sitecore/graphql",
+                ClientId = "obsolete-id",
+                ClientSecret = "obsolete-secret"
+            };
+        });
+
+        services.AddSitecoreGraphQL(o =>
+        {
+            configureCalls++;
+
+            // Inspect and selectively override prior values (including resetting booleans back to false)
+            o.Endpoint.ShouldBe("https://prior.sitecore/graphql");
+            o.ClientSecret = "overridden-default-secret";
+            o.AllowInsecureHttp = false;
+            o.AllowPostRetries = false;
+            o.EnableUnauthorizedRefresh = false;
+            o.EnableInternalLoggingSetup = false;
+            o.MaxUnauthorizedRetries = 2;
+            o.MaxCachedClients = 64;
+            o.MaxRetryBufferBytes = 8192;
+
+            o.Clients["authoring"].ClientSecret = "authoring-rotated-secret";
+            o.Clients["authoring"].AllowInsecureHttp = false;
+            o.Clients["authoring"].AllowPostRetries = true;
+            o.Clients.Remove("obsolete");
+            o.Clients["delivery"] = new SitecoreGraphQLClientOptions
+            {
+                Endpoint = "https://delivery.sitecore/graphql",
+                ClientSecret = "delivery-secret"
+            };
+        });
+
+        services.AddSingleton(Mock.Of<ISitecoreTokenService>());
+
+        // Delegate should not be evaluated eagerly before options resolution
+        configureCalls.ShouldBe(0);
+
+        using var provider = services.BuildServiceProvider();
+
+        // Resolve via both IOptions<T> and IOptionsMonitor<T> (and ISitecoreGraphQLFactory)
+        var staticOpts = provider.GetRequiredService<IOptions<SitecoreGraphQLOptions>>().Value;
+        var monitorOpts = provider.GetRequiredService<IOptionsMonitor<SitecoreGraphQLOptions>>().CurrentValue;
+        var factory = provider.GetRequiredService<ISitecoreGraphQLFactory>();
+
+        var defaultClient = await factory.CreateClientAsync();
+        var authoringClient = await factory.CreateClientByNameAsync("authoring");
+        var deliveryClient = await factory.CreateClientByNameAsync("delivery");
+
+        defaultClient.ShouldNotBeNull();
+        authoringClient.ShouldNotBeNull();
+        deliveryClient.ShouldNotBeNull();
+
+        configureCalls.ShouldBe(1);
+
+        foreach (var resolved in new[] { staticOpts, monitorOpts })
+        {
+            resolved.Endpoint.ShouldBe("https://prior.sitecore/graphql");
+            resolved.ClientId.ShouldBe("prior-client-id");
+            resolved.ClientSecret.ShouldBe("overridden-default-secret");
+            resolved.AllowInsecureHttp.ShouldBeFalse();
+            resolved.AllowPostRetries.ShouldBeFalse();
+            resolved.EnableUnauthorizedRefresh.ShouldBeFalse();
+            resolved.EnableInternalLoggingSetup.ShouldBeFalse();
+            resolved.MaxUnauthorizedRetries.ShouldBe(2);
+            resolved.MaxCachedClients.ShouldBe(64);
+            resolved.MaxRetryBufferBytes.ShouldBe(8192);
+
+            resolved.Clients.ContainsKey("obsolete").ShouldBeFalse();
+            resolved.Clients["authoring"].Endpoint.ShouldBe("https://authoring.sitecore/graphql");
+            resolved.Clients["authoring"].ClientId.ShouldBe("authoring-id");
+            resolved.Clients["authoring"].ClientSecret.ShouldBe("authoring-rotated-secret");
+            resolved.Clients["authoring"].AllowInsecureHttp.ShouldBe(false);
+            resolved.Clients["authoring"].AllowPostRetries.ShouldBe(true);
+
+            resolved.Clients["delivery"].Endpoint.ShouldBe("https://delivery.sitecore/graphql");
+            resolved.Clients["delivery"].ClientId.ShouldBeNull();
+            resolved.Clients["delivery"].ClientSecret.ShouldBe("delivery-secret");
+        }
+
+        // Also verify AddSitecoreGraphQL(configure: null) preserves prior services.Configure<SitecoreGraphQLOptions>
+        var nullDelegateServices = new ServiceCollection();
+        nullDelegateServices.Configure<SitecoreGraphQLOptions>(prior =>
+        {
+            prior.Endpoint = "https://null-delegate.sitecore/graphql";
+            prior.ClientId = "null-delegate-id";
+            prior.ClientSecret = "null-delegate-secret";
+        });
+        nullDelegateServices.AddSitecoreGraphQL(configure: null);
+        nullDelegateServices.AddSingleton(Mock.Of<ISitecoreTokenService>());
+
+        using var nullDelegateProvider = nullDelegateServices.BuildServiceProvider();
+        var preservedOpts = nullDelegateProvider.GetRequiredService<IOptions<SitecoreGraphQLOptions>>().Value;
+        preservedOpts.Endpoint.ShouldBe("https://null-delegate.sitecore/graphql");
+        preservedOpts.ClientId.ShouldBe("null-delegate-id");
+        preservedOpts.ClientSecret.ShouldBe("null-delegate-secret");
+    }
+
     private sealed class StubOkHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

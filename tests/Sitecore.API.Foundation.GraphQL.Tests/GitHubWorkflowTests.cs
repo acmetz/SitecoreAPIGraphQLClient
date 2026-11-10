@@ -188,4 +188,23 @@ public class GitHubWorkflowTests
             }
         }
     }
+
+    [Fact]
+    public void ReadmeFile_ShouldNotContainRelativeLinks_ThatBreakOnNuGetOrg()
+    {
+        var readmePath = Path.Combine(RepoRoot, "README.md");
+        File.Exists(readmePath).ShouldBeTrue();
+
+        var readmeContent = File.ReadAllText(readmePath);
+        var linkMatches = Regex.Matches(readmeContent, @"\[[^\]]+\]\(([^)]+)\)");
+        linkMatches.ShouldNotBeEmpty();
+
+        foreach (Match match in linkMatches)
+        {
+            var target = match.Groups[1].Value.Trim();
+            (target.StartsWith("https://", StringComparison.Ordinal) ||
+             target.StartsWith('#')).ShouldBeTrue(
+                $"README.md is packed into the NuGet package and must not use relative link '{target}' (use full https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/... URL).");
+        }
+    }
 }

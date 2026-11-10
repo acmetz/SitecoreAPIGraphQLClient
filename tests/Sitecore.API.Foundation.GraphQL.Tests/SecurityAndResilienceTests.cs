@@ -83,17 +83,17 @@ public class SecurityAndResilienceTests
             switch (i % 4)
             {
                 case 0:
-                {
-                    var client = await factory.CreateClientByNameAsync("content");
-                    await client.SendQueryAsync<JObject>(gqlQuery);
-                    break;
-                }
+                    {
+                        var client = await factory.CreateClientByNameAsync("content");
+                        await client.SendQueryAsync<JObject>(gqlQuery);
+                        break;
+                    }
                 case 1:
-                {
-                    var client = await factory.CreateClientByNameAsync("search");
-                    await client.SendQueryAsync<JObject>(gqlQuery);
-                    break;
-                }
+                    {
+                        var client = await factory.CreateClientByNameAsync("search");
+                        await client.SendQueryAsync<JObject>(gqlQuery);
+                        break;
+                    }
                 case 2:
                     await rotatedV1.SendQueryAsync<JObject>(gqlQuery);
                     break;
@@ -1423,6 +1423,100 @@ public class SecurityAndResilienceTests
         var ex2 = await Should.ThrowAsync<ArgumentException>(async () =>
             await factory.CreateClientAsync(overlongLabelUrl, "id", "secret"));
         ex2.ShouldNotBeOfType<UriFormatException>();
+    }
+
+    [Fact]
+    public async Task CredentialForwardingHandler_KeepsForwardedRequestAndSwappedStreamContentUndisposedOn200Ok_AndDetachesCallerContentOnFault()
+    {
+        var shouldFault = false;
+        var wirePayloads = new ConcurrentQueue<string>();
+
+        var services = new ServiceCollection();
+        services.AddSitecoreGraphQL(o =>
+        {
+            o.Endpoint = "https://edge.sitecorecloud.io/api/graphql/v1";
+            o.ClientId = "id";
+            o.ClientSecret = "secret";
+            o.MaxRetryBufferBytes = 4096;
+        });
+
+        var tokenService = new Mock<ISitecoreTokenService>(MockBehavior.Strict);
+        tokenService
+            .Setup(s => s.GetSitecoreAuthToken(It.IsAny<SitecoreAuthClientCredentials>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SitecoreAuthToken("tok-1", DateTimeOffset.UtcNow.AddHours(1)));
+        services.AddSingleton(tokenService.Object);
+
+        services.AddHttpClient(SitecoreGraphQLFactory.NamedHttpClient)
+            .ConfigurePrimaryHttpMessageHandler(() => new DelegateTransportHandler(async (req, ct) =>
+            {
+                if (shouldFault)
+                {
+                    throw new HttpRequestException("simulated transport fault");
+                }
+
+                var body = req.Content is null ? string.Empty : await req.Content.ReadAsStringAsync(ct);
+                wirePayloads.Enqueue(body);
+
+                var responseBytes = Encoding.UTF8.GetBytes("{\"data\":{\"ok\":true}}");
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = req,
+                    Content = new StreamContent(new NonSeekableReadStream(responseBytes))
+                };
+            }));
+
+        await using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<ISitecoreGraphQLFactory>();
+        var gqlClient = (global::GraphQL.Client.Http.GraphQLHttpClient)await factory.CreateClientAsync();
+
+        // 1) Known-length StringContent on 200 OK: response.RequestMessage and Content remain undisposed while streaming response
+        const string knownPayload = "{\"query\":\"{ knownLength }\"}";
+        using (var knownReq = new HttpRequestMessage(HttpMethod.Post, "https://edge.sitecorecloud.io/api/graphql/v1")
+        {
+            Content = new StringContent(knownPayload, Encoding.UTF8, "application/json")
+        })
+        {
+            using var resp = await gqlClient.HttpClient.SendAsync(knownReq, HttpCompletionOption.ResponseHeadersRead);
+            resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+            resp.RequestMessage.ShouldNotBeNull();
+            resp.RequestMessage.Headers.Authorization?.Parameter.ShouldBe("tok-1");
+            (await resp.RequestMessage.Content!.ReadAsStringAsync()).ShouldBe(knownPayload);
+            (await resp.Content.ReadAsStringAsync()).ShouldContain("\"ok\":true");
+        }
+
+        // 2) Unknown-length StreamContent on 200 OK (swaps forwardedRequest.Content to ReadOnlyMemoryContent):
+        // response.RequestMessage and swapped buffered Content remain undisposed and readable
+        const string unknownPayload = "{\"query\":\"{ unknownLength }\"}";
+        var unknownBytes = Encoding.UTF8.GetBytes(unknownPayload);
+        using (var streamReq = new HttpRequestMessage(HttpMethod.Post, "https://edge.sitecorecloud.io/api/graphql/v1")
+        {
+            Content = new StreamContent(new NonSeekableReadStream(unknownBytes))
+        })
+        {
+            streamReq.Content.Headers.ContentLength.ShouldBeNull();
+
+            using var resp = await gqlClient.HttpClient.SendAsync(streamReq, HttpCompletionOption.ResponseHeadersRead);
+            resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+            resp.RequestMessage.ShouldNotBeNull();
+            resp.RequestMessage.Content.ShouldNotBeNull();
+            (await resp.RequestMessage.Content.ReadAsStringAsync()).ShouldBe(unknownPayload);
+            (await resp.Content.ReadAsStringAsync()).ShouldContain("\"ok\":true");
+        }
+
+        wirePayloads.ToArray().ShouldBe([knownPayload, unknownPayload]);
+
+        // 3) Transport fault: forwardedRequest is disposed while caller-owned Content is detached and remains undisposed
+        shouldFault = true;
+        const string faultPayload = "{\"query\":\"{ fault }\"}";
+        using var faultReq = new HttpRequestMessage(HttpMethod.Post, "https://edge.sitecorecloud.io/api/graphql/v1")
+        {
+            Content = new StringContent(faultPayload, Encoding.UTF8, "application/json")
+        };
+
+        await Should.ThrowAsync<HttpRequestException>(async () =>
+            await gqlClient.HttpClient.SendAsync(faultReq, HttpCompletionOption.ResponseHeadersRead));
+
+        (await faultReq.Content.ReadAsStringAsync()).ShouldBe(faultPayload);
     }
 
     private static SitecoreGraphQLOptions CreateHotReloadSnapshot(int version)

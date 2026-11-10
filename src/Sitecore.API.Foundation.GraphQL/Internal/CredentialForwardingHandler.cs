@@ -28,7 +28,9 @@ internal sealed class CredentialForwardingHandler : HttpMessageHandler
         ArgumentNullException.ThrowIfNull(request);
 
         var originalContent = request.Content;
+#pragma warning disable CA2000 // Winning forwardedRequest remains attached to HttpResponseMessage.RequestMessage; disposed on fault below.
         var forwardedRequest = CreateForwardedRequest(request, _credentialContext);
+#pragma warning restore CA2000
         try
         {
 #pragma warning disable CA2000 // IHttpClientFactory manages pooled handler lifetimes; disposing here would break response streaming or custom shared-client test doubles.
@@ -36,15 +38,16 @@ internal sealed class CredentialForwardingHandler : HttpMessageHandler
 #pragma warning restore CA2000
             return await client.SendAsync(forwardedRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         }
-        finally
+        catch
         {
             if (ReferenceEquals(forwardedRequest.Content, originalContent))
             {
-                // Detach caller-owned content before disposing the shallow forwarding envelope.
+                // Detach caller-owned content before disposing the faulted forwarding envelope.
                 forwardedRequest.Content = null;
             }
 
             forwardedRequest.Dispose();
+            throw;
         }
     }
 

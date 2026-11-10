@@ -99,19 +99,34 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        // Evaluate configure at most once and copy the captured snapshot into OptionsBuilder.
-        var snapshot = new SitecoreGraphQLOptions();
-        configure?.Invoke(snapshot);
-
         var optionsBuilder = services.AddOptions<SitecoreGraphQLOptions>();
         if (configure is not null)
         {
-            optionsBuilder.Configure(target => CopyOptions(snapshot, target));
+            var gate = new object();
+            SitecoreGraphQLOptions? cachedBefore = null;
+            SitecoreGraphQLOptions? cachedAfter = null;
+
+            optionsBuilder.Configure(target =>
+            {
+                lock (gate)
+                {
+                    if (cachedAfter is null)
+                    {
+                        var before = CloneOptions(target);
+                        configure(target);
+                        cachedBefore = before;
+                        cachedAfter = CloneOptions(target);
+                        return;
+                    }
+
+                    ApplyConfiguredChanges(cachedBefore!, cachedAfter, target);
+                }
+            });
         }
 
         optionsBuilder.ValidateOnStart();
 
-        return AddCore(services, snapshot.EnableInternalLoggingSetup, configureResilience, configureClient);
+        return AddCore(services, enableLogging: true, configureResilience, configureClient);
     }
 
     private static IServiceCollection AddCore(
@@ -248,40 +263,171 @@ public static class ServiceCollectionExtensions
 #pragma warning restore EXTEXP0001
     }
 
-    private static void CopyOptions(SitecoreGraphQLOptions source, SitecoreGraphQLOptions target)
+    private static SitecoreGraphQLOptions CloneOptions(SitecoreGraphQLOptions source)
     {
-        target.Endpoint = source.Endpoint;
-        target.ClientId = source.ClientId;
-        target.ClientSecret = source.ClientSecret;
-        target.EnableUnauthorizedRefresh = source.EnableUnauthorizedRefresh;
-        target.MaxUnauthorizedRetries = source.MaxUnauthorizedRetries;
-        target.EnableInternalLoggingSetup = source.EnableInternalLoggingSetup;
-        target.AllowInsecureHttp = source.AllowInsecureHttp;
-        target.AllowPostRetries = source.AllowPostRetries;
-        target.MaxCachedClients = source.MaxCachedClients;
-        target.MaxRetryBufferBytes = source.MaxRetryBufferBytes;
-
-        target.Clients.Clear();
-        if (source.Clients is null)
+        var clone = new SitecoreGraphQLOptions
         {
+            Endpoint = source.Endpoint,
+            ClientId = source.ClientId,
+            ClientSecret = source.ClientSecret,
+            EnableUnauthorizedRefresh = source.EnableUnauthorizedRefresh,
+            MaxUnauthorizedRetries = source.MaxUnauthorizedRetries,
+            EnableInternalLoggingSetup = source.EnableInternalLoggingSetup,
+            AllowInsecureHttp = source.AllowInsecureHttp,
+            AllowPostRetries = source.AllowPostRetries,
+            MaxCachedClients = source.MaxCachedClients,
+            MaxRetryBufferBytes = source.MaxRetryBufferBytes,
+            Clients = source.Clients is null
+                ? null!
+                : new Dictionary<string, SitecoreGraphQLClientOptions>(source.Clients.Comparer)
+        };
+
+        if (source.Clients is not null)
+        {
+            foreach (var (name, clientOpts) in source.Clients)
+            {
+                clone.Clients[name] = clientOpts is null ? null! : CloneClientOptions(clientOpts);
+            }
+        }
+
+        return clone;
+    }
+
+    private static SitecoreGraphQLClientOptions CloneClientOptions(SitecoreGraphQLClientOptions source)
+        => new()
+        {
+            Endpoint = source.Endpoint,
+            ClientId = source.ClientId,
+            ClientSecret = source.ClientSecret,
+            AllowInsecureHttp = source.AllowInsecureHttp,
+            AllowPostRetries = source.AllowPostRetries
+        };
+
+    private static void ApplyConfiguredChanges(
+        SitecoreGraphQLOptions before,
+        SitecoreGraphQLOptions after,
+        SitecoreGraphQLOptions target)
+    {
+        if (!string.Equals(before.Endpoint, after.Endpoint, StringComparison.Ordinal))
+        {
+            target.Endpoint = after.Endpoint;
+        }
+
+        if (!string.Equals(before.ClientId, after.ClientId, StringComparison.Ordinal))
+        {
+            target.ClientId = after.ClientId;
+        }
+
+        if (!string.Equals(before.ClientSecret, after.ClientSecret, StringComparison.Ordinal))
+        {
+            target.ClientSecret = after.ClientSecret;
+        }
+
+        if (before.EnableUnauthorizedRefresh != after.EnableUnauthorizedRefresh)
+        {
+            target.EnableUnauthorizedRefresh = after.EnableUnauthorizedRefresh;
+        }
+
+        if (before.MaxUnauthorizedRetries != after.MaxUnauthorizedRetries)
+        {
+            target.MaxUnauthorizedRetries = after.MaxUnauthorizedRetries;
+        }
+
+        if (before.EnableInternalLoggingSetup != after.EnableInternalLoggingSetup)
+        {
+            target.EnableInternalLoggingSetup = after.EnableInternalLoggingSetup;
+        }
+
+        if (before.AllowInsecureHttp != after.AllowInsecureHttp)
+        {
+            target.AllowInsecureHttp = after.AllowInsecureHttp;
+        }
+
+        if (before.AllowPostRetries != after.AllowPostRetries)
+        {
+            target.AllowPostRetries = after.AllowPostRetries;
+        }
+
+        if (before.MaxCachedClients != after.MaxCachedClients)
+        {
+            target.MaxCachedClients = after.MaxCachedClients;
+        }
+
+        if (before.MaxRetryBufferBytes != after.MaxRetryBufferBytes)
+        {
+            target.MaxRetryBufferBytes = after.MaxRetryBufferBytes;
+        }
+
+        if (after.Clients is null)
+        {
+            target.Clients = null!;
             return;
         }
 
-        foreach (var (name, clientOpts) in source.Clients)
+        target.Clients ??= new Dictionary<string, SitecoreGraphQLClientOptions>(after.Clients.Comparer);
+
+        if (before.Clients is not null)
         {
-            if (clientOpts is null)
+            foreach (var (name, _) in before.Clients)
             {
+                if (!after.Clients.ContainsKey(name))
+                {
+                    target.Clients.Remove(name);
+                }
+            }
+        }
+
+        foreach (var (name, afterClient) in after.Clients)
+        {
+            if (afterClient is null)
+            {
+                target.Clients[name] = null!;
                 continue;
             }
 
-            target.Clients[name] = new SitecoreGraphQLClientOptions
+            if (before.Clients is not null &&
+                before.Clients.TryGetValue(name, out var beforeClient) &&
+                beforeClient is not null &&
+                target.Clients.TryGetValue(name, out var targetClient) &&
+                targetClient is not null)
             {
-                Endpoint = clientOpts.Endpoint,
-                ClientId = clientOpts.ClientId,
-                ClientSecret = clientOpts.ClientSecret,
-                AllowInsecureHttp = clientOpts.AllowInsecureHttp,
-                AllowPostRetries = clientOpts.AllowPostRetries
-            };
+                ApplyClientChanges(beforeClient, afterClient, targetClient);
+            }
+            else
+            {
+                target.Clients[name] = CloneClientOptions(afterClient);
+            }
+        }
+    }
+
+    private static void ApplyClientChanges(
+        SitecoreGraphQLClientOptions before,
+        SitecoreGraphQLClientOptions after,
+        SitecoreGraphQLClientOptions target)
+    {
+        if (!string.Equals(before.Endpoint, after.Endpoint, StringComparison.Ordinal))
+        {
+            target.Endpoint = after.Endpoint;
+        }
+
+        if (!string.Equals(before.ClientId, after.ClientId, StringComparison.Ordinal))
+        {
+            target.ClientId = after.ClientId;
+        }
+
+        if (!string.Equals(before.ClientSecret, after.ClientSecret, StringComparison.Ordinal))
+        {
+            target.ClientSecret = after.ClientSecret;
+        }
+
+        if (before.AllowInsecureHttp != after.AllowInsecureHttp)
+        {
+            target.AllowInsecureHttp = after.AllowInsecureHttp;
+        }
+
+        if (before.AllowPostRetries != after.AllowPostRetries)
+        {
+            target.AllowPostRetries = after.AllowPostRetries;
         }
     }
 }

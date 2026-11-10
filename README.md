@@ -3,7 +3,7 @@
 [![NuGet](https://img.shields.io/nuget/v/SitecoreAPIGraphQLClient.svg)](https://www.nuget.org/packages/SitecoreAPIGraphQLClient)
 [![PR Check](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/pr-check.yml/badge.svg?branch=main)](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/pr-check.yml)
 [![NuGet Release Pipeline](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/nuget-release.yml/badge.svg?branch=main)](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/nuget-release.yml)
-[![License](https://img.shields.io/github/license/acmetz/SitecoreAPIGraphQLClient.svg)](LICENSE)
+[![License](https://img.shields.io/github/license/acmetz/SitecoreAPIGraphQLClient.svg)](https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/LICENSE)
 ![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-512BD4?logo=.net&logoColor=white)
 
 A high-performance, thread-safe `.NET 8`, `.NET 9`, and `.NET 10` GraphQL client factory and HTTP authentication pipeline for Sitecore XM Cloud, Experience Edge, and Authoring/Management APIs. Built on [`SitecoreAPIAuthorization`](https://www.nuget.org/packages/SitecoreAPIAuthorization) `1.0.0`.
@@ -214,10 +214,10 @@ dotnet run --configuration Release --framework net10.0 \
 
 ## Documentation
 
-- [Extended Developer and Architecture Guide](docs/README.md) — Multi-tenant patterns, `AllowInsecureHttp`, HTTP resilience & `AllowPostRetries`, `IGraphQLClient` rotation/disposal, WebSocket scope, `System.Diagnostics` telemetry, and `v0.9.x` migration notes.
-- [Contributing Guide](CONTRIBUTING.md) — Contributor prerequisites, `.slnx` layout, coverage/pack gates, and OIDC release workflow.
-- [Changelog](CHANGELOG.md) — Release history.
+- [Extended Developer and Architecture Guide](https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/docs/README.md) — Multi-tenant patterns, `AllowInsecureHttp`, HTTP resilience & `AllowPostRetries`, `IGraphQLClient` rotation/disposal, WebSocket scope, `System.Diagnostics` telemetry, and `v0.9.x` migration notes.
+- [Contributing Guide](https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/CONTRIBUTING.md) — Contributor prerequisites, `.slnx` layout, coverage/pack gates, and OIDC release workflow.
+- [Changelog](https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/CHANGELOG.md) — Release history.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/LICENSE) for details.
