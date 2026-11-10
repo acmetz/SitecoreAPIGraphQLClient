@@ -1,4 +1,4 @@
-﻿using GraphQL.Client.Abstractions;
+using GraphQL.Client.Abstractions;
 using GraphQL.Client.Http;
 using GraphQL.Client.Serializer.Newtonsoft;
 using System.Collections.Concurrent;
@@ -6,6 +6,10 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 
 namespace Sitecore.API.Foundation.GraphQL;
+
+/// <summary>
+/// Thread-safe factory for creating and caching Sitecore GraphQL clients.
+/// </summary>
 public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
 {
     private readonly ConcurrentDictionary<string, Lazy<Task<IGraphQLClient>>> _clients = new();
@@ -14,8 +18,19 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
     private readonly ILogger<SitecoreGraphQLFactory>? _logger;
     private readonly ISitecoreTokenCache _tokenCache;
 
+    /// <summary>
+    /// Logical <see cref="HttpClient"/> name registered with <see cref="IHttpClientFactory"/> for Sitecore GraphQL calls.
+    /// </summary>
     public const string NamedHttpClient = "SitecoreGraphQL";
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SitecoreGraphQLFactory"/> class.
+    /// </summary>
+    /// <param name="tokenService">The Sitecore authentication token service.</param>
+    /// <param name="options">Configured Sitecore GraphQL options.</param>
+    /// <param name="httpClientFactory">The HTTP client factory.</param>
+    /// <param name="tokenCache">The token cache adapter.</param>
+    /// <param name="logger">Optional logger instance.</param>
     public SitecoreGraphQLFactory(
         Authorization.Abstractions.ISitecoreTokenService tokenService,
         IOptions<SitecoreGraphQLOptions> options,
@@ -30,6 +45,7 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
         _logger = logger;
     }
 
+    /// <inheritdoc />
     public async Task<IGraphQLClient> CreateClientAsync(string url, string clientId, string clientSecret, CancellationToken cancellationToken = default)
     {
         ValidateRequired(url, nameof(url));
@@ -52,27 +68,46 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
         return client;
     }
 
+    /// <summary>
+    /// Creates or reuses a cached GraphQL client for the specified URL using explicit client credentials.
+    /// </summary>
+    /// <param name="url">The GraphQL endpoint URL.</param>
+    /// <param name="clientId">The OAuth client identifier.</param>
+    /// <param name="clientSecret">The OAuth client secret.</param>
+    /// <returns>An <see cref="IGraphQLClient"/> configured for the URL.</returns>
     public async Task<IGraphQLClient> CreateClientAsync(string url, string clientId, string clientSecret)
         => await CreateClientAsync(url, clientId, clientSecret, CancellationToken.None).ConfigureAwait(false);
 
+    /// <inheritdoc />
     public async Task<IGraphQLClient> CreateClientAsync(string url, CancellationToken cancellationToken = default)
     {
         var (id, secret) = GetDefaultCredentialsOrThrow(url);
         return await CreateClientAsync(url, id, secret, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Creates or reuses a cached GraphQL client for the specified URL using credentials from options.
+    /// </summary>
+    /// <param name="url">The GraphQL endpoint URL.</param>
+    /// <returns>An <see cref="IGraphQLClient"/> configured for the URL.</returns>
     public async Task<IGraphQLClient> CreateClientAsync(string url)
         => await CreateClientAsync(url, CancellationToken.None).ConfigureAwait(false);
 
+    /// <inheritdoc />
     public async Task<IGraphQLClient> CreateClientAsync(CancellationToken cancellationToken = default)
     {
         var endpoint = GetDefaultEndpointOrThrow();
         return await CreateClientAsync(endpoint, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Creates or reuses a cached GraphQL client using the default endpoint and credentials from options.
+    /// </summary>
+    /// <returns>An <see cref="IGraphQLClient"/> configured for the default endpoint.</returns>
     public async Task<IGraphQLClient> CreateClientAsync()
         => await CreateClientAsync(CancellationToken.None).ConfigureAwait(false);
 
+    /// <inheritdoc />
     public async Task<IGraphQLClient> CreateClientByNameAsync(string clientName, CancellationToken cancellationToken = default)
     {
         ValidateRequired(clientName, nameof(clientName));
@@ -80,6 +115,7 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory
         return await CreateClientAsync(url, id, secret, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     public async Task<bool> RefreshTokenAsync(CancellationToken cancellationToken = default)
     {
         var token = await _tokenCache.ForceRefreshAsync(cancellationToken).ConfigureAwait(false);

@@ -32,7 +32,7 @@ public sealed class SitecoreGraphQLOptions
 
     /// <summary>
     /// When true (default), the DI extension wires minimal logging infrastructure via TryAdd
-    /// so that downstream services (e.g., Sitecore Token Service) can receive ILogger<T> if the host
+    /// so that downstream services (e.g., Sitecore Token Service) can receive <see cref="Microsoft.Extensions.Logging.ILogger{TCategoryName}"/> if the host
     /// did not call AddLogging. Set to false to opt out.
     /// </summary>
     public bool EnableInternalLoggingSetup { get; set; } = true;
@@ -48,7 +48,18 @@ public sealed class SitecoreGraphQLOptions
 /// </summary>
 public sealed class SitecoreGraphQLClientOptions
 {
+    /// <summary>
+    /// GraphQL endpoint URL for this named client. Falls back to <see cref="SitecoreGraphQLOptions.Endpoint"/> when null or whitespace.
+    /// </summary>
     public string? Endpoint { get; set; }
+
+    /// <summary>
+    /// OAuth client identifier for this named client. Falls back to <see cref="SitecoreGraphQLOptions.ClientId"/> when null or whitespace.
+    /// </summary>
     public string? ClientId { get; set; }
+
+    /// <summary>
+    /// OAuth client secret for this named client. Falls back to <see cref="SitecoreGraphQLOptions.ClientSecret"/> when null or whitespace.
+    /// </summary>
     public string? ClientSecret { get; set; }
 }

@@ -35,6 +35,10 @@ ScaffoldingReadMe.txt
 *.nupkg
 # NuGet Symbol Packages
 *.snupkg
+nupkgs/
+
+# BenchmarkDotNet
+BenchmarkDotNet.Artifacts/
 
 # Others
 ~$*

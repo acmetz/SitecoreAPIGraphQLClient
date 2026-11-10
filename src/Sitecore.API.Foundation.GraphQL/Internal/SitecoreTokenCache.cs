@@ -5,7 +5,7 @@ using Sitecore.API.Foundation.Authorization.Models;
 
 namespace Sitecore.API.Foundation.GraphQL.Internal;
 
-internal sealed class SitecoreTokenCache : ISitecoreTokenCache
+internal sealed class SitecoreTokenCache : ISitecoreTokenCache, IDisposable
 {
     private readonly ISitecoreTokenService _tokenService;
     private readonly IOptions<SitecoreGraphQLOptions> _options;
@@ -61,4 +61,6 @@ internal sealed class SitecoreTokenCache : ISitecoreTokenCache
             _lock.Release();
         }
     }
+
+    public void Dispose() => _lock.Dispose();
 }

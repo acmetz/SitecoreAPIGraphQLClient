@@ -80,11 +80,22 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
             if (attempt < maxRetries - 1)
             {
                 var delay = ComputeBackoffDelay(attempt);
-                _logger?.LogTrace($"Unauthorized persisted. Waiting {delay}ms before next retry.");
+                _logger?.LogTrace("Unauthorized persisted. Waiting {DelayMs}ms before next retry.", delay.TotalMilliseconds);
                 await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
             }
         }
         return response;
+    }
+
+    /// <inheritdoc />
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _refreshLock.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     private static TimeSpan ComputeBackoffDelay(int attempt)
