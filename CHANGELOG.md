@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Added Elephant-Goldfish Model (EGM) architectural contract documentation across the `src/` directory hierarchy (`src/README.md` blueprint and component package contracts for `Abstractions`, `DependencyInjection`, `Http`, `Internal`, and `Properties`).
+
 ## [1.0.0] - 2026-11-09
 
 ### Added

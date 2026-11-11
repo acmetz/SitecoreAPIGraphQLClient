@@ -34,6 +34,7 @@ These instructions define how the coding assistant ("the agent") must operate fo
 
 5. **Documentation Required**
    - Update `README.md` in repo root (concise overview + benchmarks) and `docs/README.md` (detailed guide) with each completed feature.
+   - Keep the EGM architectural contract files under `src/` (`src/README.md` and `src/Sitecore.API.Foundation.GraphQL/**/README.md`) synchronized whenever public APIs, internal contracts, invariants, or side effects change.
    - Update `CHANGELOG.md` in repo root for every notable change.
    - No emojis in any documentation.
 

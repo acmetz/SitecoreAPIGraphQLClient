@@ -25,10 +25,12 @@ This guide covers multi-tenant configuration, security hardening, HTTP resilienc
 `SitecoreAPIGraphQLClient` layers per-client GraphQL management over [`SitecoreAPIAuthorization`](https://www.nuget.org/packages/SitecoreAPIAuthorization) `1.0.0` (`ISitecoreTokenService`):
 
 1. **`SitecoreGraphQLFactory`** validates URLs and credentials synchronously and caches `GraphQLHttpClient` instances (`NewtonsoftJsonSerializer`) keyed by canonical endpoint URL, `ClientId`, `ClientSecret`, optional client name, and retry policy.
-2. **`CredentialForwardingHandler`** is a lightweight socket-free `HttpMessageHandler` attached to each cached `GraphQLHttpClient`. For every outbound GraphQL query or mutation, it creates a shallow `HttpRequestMessage` envelope, stamps a secret-masked `CredentialContext` into `HttpRequestMessage.Options`, shares `request.Content` by reference without copying bytes, and dispatches through `IHttpClientFactory.CreateClient("SitecoreGraphQL")`. This preserves `ReferenceEquals` on cached `IGraphQLClient` instances while allowing `IHttpClientFactory` to rotate pooled socket handlers every 2 minutes for DNS updates.
-3. **`SitecoreTokenHandler`** sits outermost on the `"SitecoreGraphQL"` pipeline. It reads per-request credentials from `HttpRequestMessage.Options` (falling back to default `SitecoreGraphQLOptions`), resolves bearer tokens via a stateless internal coordinator, pre-buffers request content up to `MaxRetryBufferBytes` when replay is enabled, and clones fresh `HttpRequestMessage` instances over `ReadOnlyMemoryContent` strictly when an `HTTP 401 Unauthorized` retry occurs.
+2. **`CredentialForwardingHandler`** is a lightweight socket-free `HttpMessageHandler` attached to each cached `GraphQLHttpClient`. For every outbound GraphQL query or mutation, it creates a shallow `HttpRequestMessage` envelope, stamps a secret-masked `CredentialContext` into `HttpRequestMessage.Options`, shares `request.Content` by reference without copying bytes, and dispatches through `IHttpClientFactory.CreateClient(SitecoreGraphQLFactory.NamedHttpClient)` (`"SitecoreGraphQL"`). This preserves `ReferenceEquals` on cached `IGraphQLClient` instances while allowing `IHttpClientFactory` to rotate pooled socket handlers every 2 minutes for DNS updates.
+3. **`SitecoreTokenHandler`** sits outermost on the `SitecoreGraphQLFactory.NamedHttpClient` (`"SitecoreGraphQL"`) pipeline. It reads per-request credentials from `HttpRequestMessage.Options` (falling back to default `SitecoreGraphQLOptions`), resolves bearer tokens via a stateless internal coordinator, pre-buffers request content up to `MaxRetryBufferBytes` when replay is enabled, and clones fresh `HttpRequestMessage` instances over `ReadOnlyMemoryContent` strictly when an `HTTP 401 Unauthorized` retry occurs.
 4. **Stateless Token Coordination** resolves `ISitecoreTokenService` inside async DI scopes (`IServiceScopeFactory.CreateAsyncScope()`) and coalesces concurrent `401` or manual refresh bursts per `(ClientId, ClientSecret)` into a single `ISitecoreTokenService.TryRefreshSitecoreAuthToken` call.
 5. **Optional `StandardResilienceHandler`** sits inside `SitecoreTokenHandler` when `configureResilience` is supplied, partitioned by `(authority, client)` with `HTTP POST` retries disabled by default.
+
+See the [EGM Source Architectural Blueprint](../src/README.md) and its linked component contracts under [../src/Sitecore.API.Foundation.GraphQL/README.md](../src/Sitecore.API.Foundation.GraphQL/README.md) for per-directory symbol interfaces, invariants, and side effects.
 
 ---
 
@@ -247,7 +249,7 @@ Register `SitecoreGraphQLDiagnostics.InstrumentationName` (`"Sitecore.API.Founda
   - `sitecore.graphql.client_cache.evictions` (`Counter<long>`) — Dynamic client cache FIFO evictions
   - `sitecore.graphql.token.refresh.duration` (`Histogram<double>`, `ms`) — Token refresh latency
 
-Telemetry tags use bounded low-cardinality `client.name` values (configured named client key, `"default"`, or `"explicit"`) and never include raw URLs, query strings, client IDs, or secrets.
+Token and authentication telemetry tags use bounded low-cardinality `client.name` values (configured named client key, `"default"`, or `"explicit"`), while `sitecore.graphql.client_cache.evictions` is emitted untagged; telemetry never includes raw URLs, query strings, client IDs, or secrets.
 
 ---
 

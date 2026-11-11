@@ -40,7 +40,8 @@ SitecoreAPIGraphQLClient/
   global.json
   .editorconfig
   src/
-    Sitecore.API.Foundation.GraphQL/                 # Main NuGet class library (net8.0;net9.0;net10.0)
+    README.md                                        # EGM source architectural blueprint
+    Sitecore.API.Foundation.GraphQL/                 # Main NuGet class library (net8.0;net9.0;net10.0) and EGM component contracts
   tests/
     Sitecore.API.Foundation.GraphQL.Tests/           # xUnit + Shouldly + Moq unit and contract tests
     Sitecore.API.Foundation.GraphQL.Benchmarks/      # BenchmarkDotNet multi-runtime benchmark suite
@@ -95,7 +96,7 @@ dotnet run --configuration Release --framework net10.0 \
 - **Dependencies**: Manage all NuGet versions centrally in `Directory.Packages.props`. Never add `Version` attributes to `<PackageReference>` items in `.csproj` files, and keep test-only packages scoped under `Condition="'$(IsPackable)' != 'true'"` so they never leak into the packed `.nuspec`.
 - **Serialization and HTTP**: `GraphQLHttpClient` uses `NewtonsoftJsonSerializer` (`Newtonsoft.Json`). Never instantiate long-lived `SocketsHttpHandler` pipelines per client; route outbound HTTP calls through `IHttpClientFactory`.
 - **Security**: Never log raw secrets, bearer tokens, `Uri.UserInfo`, or endpoint query strings (`?sc_apikey=...`).
-- **Documentation**: Update `README.md`, `docs/README.md`, and `CHANGELOG.md` for user-visible changes. Do not use emojis in repository documentation.
+- **Documentation**: Update `README.md`, `docs/README.md`, `CHANGELOG.md`, and the EGM architectural contract READMEs under `src/` (`src/README.md` and `src/Sitecore.API.Foundation.GraphQL/**/README.md`) when public APIs, internal contracts, or invariants change. Do not use emojis in repository documentation.
 
 ## Pull Request and Release Process
 
