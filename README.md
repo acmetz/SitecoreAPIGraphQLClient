@@ -215,6 +215,7 @@ dotnet run --configuration Release --framework net10.0 \
 ## Documentation
 
 - [Extended Developer and Architecture Guide](https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/docs/README.md) — Multi-tenant patterns, `AllowInsecureHttp`, HTTP resilience & `AllowPostRetries`, `IGraphQLClient` rotation/disposal, WebSocket scope, `System.Diagnostics` telemetry, and `v0.9.x` migration notes.
+- [EGM Source Architectural Blueprint](https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/src/README.md) — Component-level interface contracts, invariants, and side effects across `src/`.
 - [Contributing Guide](https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/CONTRIBUTING.md) — Contributor prerequisites, `.slnx` layout, coverage/pack gates, and OIDC release workflow.
 - [Changelog](https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/CHANGELOG.md) — Release history.
 
