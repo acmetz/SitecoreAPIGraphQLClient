@@ -33,6 +33,20 @@ public class GitHubWorkflowTests
         "SitecoreAPIAuthorization"
     ];
 
+    // .NET 11 SDK AddPrunePackageReferences prunes Microsoft.Extensions.Logging.Abstractions
+    // and Microsoft.Extensions.Options (included in Microsoft.NETCore.App 11.0 PackageOverrides.txt),
+    // matching SitecoreAPIAuthorization 1.1.0's packed net11.0 .nuspec dependency group.
+    private static readonly string[] ExpectedNet11RuntimeDependencies =
+    [
+        "GraphQL.Client",
+        "GraphQL.Client.Abstractions",
+        "GraphQL.Client.Serializer.Newtonsoft",
+        "Microsoft.Extensions.Http",
+        "Microsoft.Extensions.Http.Resilience",
+        "Microsoft.Extensions.Options.ConfigurationExtensions",
+        "SitecoreAPIAuthorization"
+    ];
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -97,7 +111,7 @@ public class GitHubWorkflowTests
         var csprojDoc = XDocument.Load(MainCsprojPath);
         var targetFrameworksRaw = csprojDoc.Descendants("TargetFrameworks").First().Value;
         var targetFrameworks = targetFrameworksRaw.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        targetFrameworks.ShouldBe(["net8.0", "net9.0", "net10.0"]);
+        targetFrameworks.ShouldBe(["net10.0", "net11.0"]);
 
         var nugetWorkflow = File.ReadAllText(NugetReleaseWorkflowPath);
         var prCheckWorkflow = File.ReadAllText(PrCheckWorkflowPath);
@@ -159,13 +173,21 @@ public class GitHubWorkflowTests
         directPackageRefs.ShouldNotContain("GraphQL");
         directPackageRefs.ShouldNotContain("Microsoft.Extensions.Configuration.Binder");
 
+        var packageVersion = csprojDoc.Descendants("PackageVersion").First().Value.Trim();
+
         var nupkgsDir = Path.Combine(RepoRoot, "nupkgs");
         if (!Directory.Exists(nupkgsDir))
         {
             return;
         }
 
-        foreach (var nupkgPath in Directory.GetFiles(nupkgsDir, "SitecoreAPIGraphQLClient.*.nupkg"))
+        var nupkgPaths = Directory.GetFiles(nupkgsDir, "SitecoreAPIGraphQLClient.*.nupkg");
+        nupkgPaths.ShouldNotBeEmpty("Expected packed .nupkg file when ./nupkgs directory exists.");
+
+        File.Exists(Path.Combine(nupkgsDir, $"SitecoreAPIGraphQLClient.{packageVersion}.nupkg")).ShouldBeTrue();
+        File.Exists(Path.Combine(nupkgsDir, $"SitecoreAPIGraphQLClient.{packageVersion}.snupkg")).ShouldBeTrue();
+
+        foreach (var nupkgPath in nupkgPaths)
         {
             using var archive = ZipFile.OpenRead(nupkgPath);
             var nuspecEntry = archive.Entries.FirstOrDefault(e => e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase));
@@ -174,18 +196,53 @@ public class GitHubWorkflowTests
             using var stream = nuspecEntry.Open();
             var nuspecDoc = XDocument.Load(stream);
             var groups = nuspecDoc.Descendants().Where(e => e.Name.LocalName == "group").ToArray();
-            groups.Length.ShouldBe(3);
+            groups.Length.ShouldBe(2);
 
+            var foundTfms = new List<string>(groups.Length);
             foreach (var group in groups)
             {
-                var deps = group.Elements()
+                var rawTfm = group.Attribute("targetFramework")?.Value;
+                rawTfm.ShouldNotBeNullOrWhiteSpace();
+                var normalizedTfm = rawTfm switch
+                {
+                    ".NETCoreApp10.0" => "net10.0",
+                    ".NETCoreApp11.0" => "net11.0",
+                    _ => rawTfm
+                };
+                foundTfms.Add(normalizedTfm);
+
+                var depElements = group.Elements()
                     .Where(e => e.Name.LocalName == "dependency")
+                    .ToArray();
+
+                var deps = depElements
                     .Select(e => e.Attribute("id")!.Value)
                     .OrderBy(id => id, StringComparer.Ordinal)
                     .ToArray();
 
-                deps.ShouldBe(ExpectedRuntimeDependencies);
+                var expectedDeps = normalizedTfm == "net11.0"
+                    ? ExpectedNet11RuntimeDependencies
+                    : ExpectedRuntimeDependencies;
+                deps.ShouldBe(expectedDeps);
+
+                var authDep = depElements.Single(e => e.Attribute("id")!.Value == "SitecoreAPIAuthorization");
+                var rawVersion = authDep.Attribute("version")?.Value;
+                rawVersion.ShouldNotBeNullOrWhiteSpace();
+
+                var lowerBound = rawVersion.Split(',')[0].Trim().Trim('[', ']', '(', ')', ' ');
+                var withoutBuildMetadata = lowerBound.Split('+')[0];
+                var dashIndex = withoutBuildMetadata.IndexOf('-');
+                var numericPart = dashIndex >= 0 ? withoutBuildMetadata[..dashIndex] : withoutBuildMetadata;
+                var hasPrerelease = dashIndex >= 0;
+
+                var parsed = Version.Parse(numericPart);
+                var minRequired = new Version(1, 1, 0);
+                (parsed > minRequired || (parsed == minRequired && !hasPrerelease)).ShouldBeTrue(
+                    $"SitecoreAPIAuthorization dependency version '{rawVersion}' in TFM group '{rawTfm}' must be >= 1.1.0 GA.");
             }
+
+            foundTfms.Count.ShouldBe(2);
+            foundTfms.OrderBy(t => t, StringComparer.Ordinal).ToArray().ShouldBe(["net10.0", "net11.0"]);
         }
     }
 

@@ -3,14 +3,14 @@
 [![NuGet](https://img.shields.io/nuget/v/SitecoreAPIGraphQLClient.svg)](https://www.nuget.org/packages/SitecoreAPIGraphQLClient)
 [![PR Check](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/pr-check.yml/badge.svg?branch=main)](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/pr-check.yml)
 [![NuGet Release Pipeline](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/nuget-release.yml/badge.svg?branch=main)](https://github.com/acmetz/SitecoreAPIGraphQLClient/actions/workflows/nuget-release.yml)
-[![License](https://img.shields.io/github/license/acmetz/SitecoreAPIGraphQLClient.svg)](https://github.com/acmetz/SitecoreAPIGraphQLClient/blob/main/LICENSE)
-![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-512BD4?logo=.net&logoColor=white)
+[![License](https://img.shields.io/github/license/acmetz/SitecoreAPIGraphQLClient.svg)](https://github.com/acmetz/SitecoreAPIGraphClient/blob/main/LICENSE)
+![.NET](https://img.shields.io/badge/.NET-10%20%7C%2011-512BD4?logo=.net&logoColor=white)
 
-A high-performance, thread-safe `.NET 8`, `.NET 9`, and `.NET 10` GraphQL client factory and HTTP authentication pipeline for Sitecore XM Cloud, Experience Edge, and Authoring/Management APIs. Built on [`SitecoreAPIAuthorization`](https://www.nuget.org/packages/SitecoreAPIAuthorization) `1.0.0`.
+A high-performance, thread-safe `.NET 10` and `.NET 11` GraphQL client factory and HTTP authentication pipeline for Sitecore XM Cloud, Experience Edge, and Authoring/Management APIs. Built on [`SitecoreAPIAuthorization`](https://www.nuget.org/packages/SitecoreAPIAuthorization) `1.1.0`.
 
 ## Key Features
 
-- Multi-targeted for `.NET 8.0`, `.NET 9.0`, and `.NET 10.0` with portable `.snupkg` symbols and SourceLink
+- Multi-targeted for `.NET 10.0` and `.NET 11.0` with portable `.snupkg` symbols and SourceLink, featuring isolated per-consumer typed `ISitecoreGraphQLFactory<TClient>` registrations
 - Strict per-client `(url, clientId, clientSecret)` OAuth2 bearer-token isolation across named and dynamic multi-tenant clients
 - Preserves 2-minute `IHttpClientFactory` socket handler rotation for DNS updates while caching `IGraphQLClient` instances (`MaxCachedClients` FIFO eviction for dynamic tenants)
 - Automatic `HTTP 401 Unauthorized` recovery with single-flight token refresh coalescing (`TryRefreshSitecoreAuthToken`) and `HTTP POST` GraphQL mutation payload replay
@@ -93,6 +93,23 @@ builder.Services.AddSitecoreGraphQL(options =>
 });
 ```
 
+For multiple independent Sitecore GraphQL environments or OAuth authorities in one container, register typed clients (`ISitecoreGraphQLFactory<TClient>`) via `AddSitecoreGraphQL<TClient>()`:
+
+```csharp
+builder.Services
+    .AddSitecoreGraphQL<AuthoringConsumer>(options =>
+    {
+        options.Endpoint = "https://authoring.example/sitecore/api/authoring/graphql/v1";
+        options.ClientId = "authoring-client-id";
+        options.ClientSecret = "authoring-client-secret";
+    })
+    .ConfigureAuthentication(auth => auth
+        .ConfigureOptions(o => o.AuthTokenUrl = "https://auth-authoring.example/oauth/token"))
+    .ConfigureResilience(resilience => resilience.Retry.MaxRetryAttempts = 2);
+
+// Inject ISitecoreGraphQLFactory<AuthoringConsumer> in your consumer class
+```
+
 ## Basic Usage
 
 `GraphQLHttpClient` uses `NewtonsoftJsonSerializer` (`Newtonsoft.Json`). Deserialize responses into strongly typed DTOs or `Newtonsoft.Json.Linq.JObject`:
@@ -163,7 +180,37 @@ bool deliveryRefreshed = await factory.RefreshTokenByNameAsync("delivery", ct);
 
 ## Benchmarks
 
-Measured with [BenchmarkDotNet](https://benchmarkdotnet.org/) `v0.15.8` against a 64-client populated `SitecoreGraphQLFactory` and in-memory HTTP transport handlers:
+Measured with [BenchmarkDotNet](https://benchmarkdotnet.org/) `v0.16.0-preview.2` against a 64-client populated `SitecoreGraphQLFactory` and in-memory HTTP transport handlers (`.NET 10.0` measured via `--inProcess` due to separate local runtime roots):
+
+```text
+BenchmarkDotNet v0.16.0-preview.2, macOS 27.2.1 (26B131) [Darwin 27.2.0]
+Apple M1 Max, 1 CPU, 10 logical and 10 physical cores
+.NET SDK 11.0.100
+  .NET 10.0 : .NET 10.0.14 (10.0.14, 10.0.1426.52326), Arm64 RyuJIT armv8.0-a (--inProcess)
+  .NET 11.0 : .NET 11.0.0 (11.0.0, 11.0.26.53018), Arm64 RyuJIT armv8.0-a
+```
+
+| Method | Runtime | Mean | Error | StdDev | Gen0 | Gen1 | Allocated |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `CreateClientAsync` (Explicit Cache Hit) | .NET 10.0 | 177.2 ns | 0.97 ns | 0.91 ns | 0.0114 | - | 72 B |
+| `CreateClientAsync` (Explicit Cache Hit) | .NET 11.0 | 182.2 ns | 0.47 ns | 0.40 ns | 0.0114 | - | 72 B |
+| `CreateClientByNameAsync` (Named Cache Hit) | .NET 10.0 | 275.8 ns | 1.94 ns | 1.81 ns | 0.0114 | - | 72 B |
+| `CreateClientByNameAsync` (Named Cache Hit) | .NET 11.0 | 202.9 ns | 0.63 ns | 0.56 ns | 0.0114 | - | 72 B |
+| `SitecoreTokenHandler.SendAsync` (200 OK POST) | .NET 10.0 | 539.9 ns | 3.72 ns | 3.48 ns | 0.3595 | 0.0010 | 2,256 B |
+| `SitecoreTokenHandler.SendAsync` (200 OK POST) | .NET 11.0 | 575.5 ns | 5.99 ns | 5.61 ns | 0.3605 | 0.0019 | 2,264 B |
+| `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 10.0 | 1,597.6 ns | 11.80 ns | 11.03 ns | 0.8774 | 0.0076 | 5,504 B |
+| `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 11.0 | 1,622.1 ns | 6.89 ns | 6.45 ns | 0.8793 | 0.0076 | 5,520 B |
+
+Run the benchmark suite locally:
+
+```bash
+dotnet run --configuration Release --framework net11.0 \
+  --project tests/Sitecore.API.Foundation.GraphQL.Benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks.csproj
+```
+
+### Historical Benchmarks (.NET 8.0 / .NET 9.0)
+
+Prior `v1.0.0` baseline measured with [BenchmarkDotNet](https://benchmarkdotnet.org/) `v0.15.8`:
 
 ```text
 BenchmarkDotNet v0.15.8, macOS 27.0.1 (26A434) [Darwin 27.0.0]
@@ -188,13 +235,6 @@ Apple M1 Max, 1 CPU, 10 logical and 10 physical cores
 | `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 8.0 | 1,724.6 ns | 4.20 ns | 3.93 ns | 0.8793 | 0.0057 | 5,520 B |
 | `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 9.0 | 1,771.4 ns | 5.64 ns | 5.00 ns | 0.8888 | 0.0076 | 5,584 B |
 | `SitecoreTokenHandler.SendAsync` (401 Refresh + POST Replay) | .NET 10.0 | 1,562.0 ns | 6.04 ns | 5.04 ns | 0.8774 | 0.0076 | 5,504 B |
-
-Run the benchmark suite locally:
-
-```bash
-dotnet run --configuration Release --framework net10.0 \
-  --project tests/Sitecore.API.Foundation.GraphQL.Benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks.csproj
-```
 
 ## Options Summary
 

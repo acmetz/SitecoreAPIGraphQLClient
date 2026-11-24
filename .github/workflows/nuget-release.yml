@@ -1,5 +1,5 @@
 # CI/CD Pipeline for SitecoreAPIGraphQLClient
-# Builds, tests, verifies coverage across .NET 8/9/10, and publishes .nupkg + .snupkg via NuGet OIDC Trusted Publishing.
+# Builds, tests, verifies coverage across .NET 10/11, and publishes .nupkg + .snupkg via NuGet OIDC Trusted Publishing.
 
 name: NuGet Release Pipeline
 
@@ -21,12 +21,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - dotnet: '8.0.x'
-            tfm: 'net8.0'
-          - dotnet: '9.0.x'
-            tfm: 'net9.0'
           - dotnet: '10.0.x'
             tfm: 'net10.0'
+          - dotnet: '11.0.x'
+            tfm: 'net11.0'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -37,9 +35,8 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.x
+            11.0.x
 
       - name: Restore solution
         run: dotnet restore Sitecore.API.Foundation.GraphQL.slnx
@@ -79,6 +76,7 @@ jobs:
               "Sitecore.API.Foundation.GraphQL.SitecoreGraphQLDiagnostics",
               "Sitecore.API.Foundation.GraphQL.Http.SitecoreTokenHandler",
               "Sitecore.API.Foundation.GraphQL.DependencyInjection.ServiceCollectionExtensions",
+              "Sitecore.API.Foundation.GraphQL.DependencyInjection.SitecoreGraphQLBuilder",
           )
           pub_valid = 0
           pub_covered = 0
@@ -133,9 +131,8 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.x
+            11.0.x
 
       - name: Verify tag matches PackageVersion
         env:
@@ -158,6 +155,17 @@ jobs:
             --no-restore \
             -p:ContinuousIntegrationBuild=true \
             --output ./nupkgs
+
+      - name: Verify packed NuGet and .nuspec contract
+        shell: bash
+        run: |
+          compgen -G "./nupkgs/SitecoreAPIGraphQLClient.*.nupkg" > /dev/null && compgen -G "./nupkgs/SitecoreAPIGraphQLClient.*.snupkg" > /dev/null
+          dotnet test tests/Sitecore.API.Foundation.GraphQL.Tests/Sitecore.API.Foundation.GraphQL.Tests.csproj \
+            --configuration Release \
+            --no-restore \
+            --framework net11.0 \
+            --filter "FullyQualifiedName~LibraryCsproj_AndPackedNuspecIfPresent_ShouldContainStrictlyIntendedRuntimeDependencies" \
+            -- RunConfiguration.TreatNoTestsAsError=true
 
       - name: Upload NuGet and symbol packages
         uses: actions/upload-artifact@v4

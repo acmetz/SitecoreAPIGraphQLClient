@@ -12,9 +12,8 @@ public static class Program
         if (args.Length == 0)
         {
             var config = DefaultConfig.Instance
-                .AddJob(Job.Default.WithRuntime(CoreRuntime.Core80))
-                .AddJob(Job.Default.WithRuntime(CoreRuntime.Core90))
-                .AddJob(Job.Default.WithRuntime(CoreRuntime.Core10_0));
+                .AddJob(Job.Default.WithRuntime(CoreRuntime.Core10_0))
+                .AddJob(Job.Default.WithRuntime(CoreRuntime.Core11_0));
 
             BenchmarkRunner.Run<GraphQLClientBenchmarks>(config);
             return;

@@ -4,14 +4,14 @@ Contributions to `Sitecore.API.Foundation.GraphQL` (`SitecoreAPIGraphQLClient`) 
 
 ## Prerequisites
 
-- `.NET 10.0` SDK (`10.0.100` or later feature band per `global.json`)
-- `.NET 8.0`, `.NET 9.0`, and `.NET 10.0` runtimes (for multi-target test and benchmark execution)
+- `.NET 11.0` SDK (`11.0.100` or later feature band per `global.json`)
+- `.NET 10.0` and `.NET 11.0` runtimes (for multi-target test and benchmark execution)
 - Git
 - Optional local CI tools:
   - [`actionlint`](https://github.com/rhysd/actionlint) for linting `.github/workflows/*.yml`
   - [`act`](https://github.com/nektos/act) for local workflow verification (`.actrc` is preconfigured)
 
-Downstream NuGet consumers only require `.NET 8.0`, `.NET 9.0`, or `.NET 10.0`.
+Downstream NuGet consumers require `.NET 10.0` or `.NET 11.0`.
 
 ## Getting Started
 
@@ -22,7 +22,7 @@ cd SitecoreAPIGraphQLClient
 # Restore packages
 dotnet restore Sitecore.API.Foundation.GraphQL.slnx
 
-# Build in Release mode (TreatWarningsAsErrors=true across net8.0, net9.0, net10.0)
+# Build in Release mode (TreatWarningsAsErrors=true across net10.0, net11.0)
 dotnet build Sitecore.API.Foundation.GraphQL.slnx --configuration Release --no-restore
 
 # Run unit and contract tests across all target frameworks
@@ -41,12 +41,13 @@ SitecoreAPIGraphQLClient/
   .editorconfig
   src/
     README.md                                        # EGM source architectural blueprint
-    Sitecore.API.Foundation.GraphQL/                 # Main NuGet class library (net8.0;net9.0;net10.0) and EGM component contracts
+    Sitecore.API.Foundation.GraphQL/                 # Main NuGet class library (net10.0;net11.0) and EGM component contracts
   tests/
     Sitecore.API.Foundation.GraphQL.Tests/           # xUnit + Shouldly + Moq unit and contract tests
     Sitecore.API.Foundation.GraphQL.Benchmarks/      # BenchmarkDotNet multi-runtime benchmark suite
   docs/
     README.md                                        # Extended developer and architecture guide
+    designs/                                         # Architectural design specs
   .github/
     workflows/
       pr-check.yml                                   # Pull request lint, multi-TFM build/test/coverage/pack check
@@ -78,16 +79,16 @@ Verify both `SitecoreAPIGraphQLClient.<version>.nupkg` and `SitecoreAPIGraphQLCl
 
 ### Benchmarks
 
-Run the full `.NET 8.0`, `.NET 9.0`, and `.NET 10.0` memory-diagnosed benchmark suite in `Release` mode:
+Run the full `.NET 10.0` and `.NET 11.0` memory-diagnosed benchmark suite in `Release` mode:
 
 ```bash
-dotnet run --configuration Release --framework net10.0 \
+dotnet run --configuration Release --framework net11.0 \
   --project tests/Sitecore.API.Foundation.GraphQL.Benchmarks/Sitecore.API.Foundation.GraphQL.Benchmarks.csproj
 ```
 
 ## Coding Standards
 
-- **Compiler and Analyzers**: `LangVersion` is `14.0`, `Nullable` is `enable`, and `TreatWarningsAsErrors` is `true` in `Directory.Build.props`. All code must build with zero warnings.
+- **Compiler and Analyzers**: `LangVersion` is `15.0`, `Nullable` is `enable`, and `TreatWarningsAsErrors` is `true` in `Directory.Build.props`. All code must build with zero warnings.
 - **Formatting and Naming**: Follow `.editorconfig` at repository root:
   - 4 spaces for C#, 2 spaces for XML/JSON/YAML, UTF-8, LF line endings
   - File-scoped namespaces and Allman braces
@@ -102,5 +103,5 @@ dotnet run --configuration Release --framework net10.0 \
 
 1. Create a branch named `feature/<short-name>` or `fix/<short-name>` from `main`.
 2. Use Conventional Commits (`feat:`, `fix:`, `perf:`, `test:`, `docs:`, `build:`, `ci:`).
-3. Ensure `PR Check` passes across `lint-workflows` and all `net8.0`, `net9.0`, and `net10.0` matrix legs.
+3. Ensure `PR Check` passes across `lint-workflows` and all `net10.0` and `net11.0` matrix legs.
 4. Releases are published from `main` by pushing a semantic version tag matching `<PackageVersion>` (for example `v1.0.0`), which triggers `.github/workflows/nuget-release.yml` using NuGet.org OIDC Trusted Publishing (`NuGet/login@v1` in the `nuget` GitHub Environment).

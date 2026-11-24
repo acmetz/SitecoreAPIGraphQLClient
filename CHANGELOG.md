@@ -4,8 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-24
+
 ### Added
-- Added Elephant-Goldfish Model (EGM) architectural contract documentation across the `src/` directory hierarchy (`src/README.md` blueprint and component package contracts for `Abstractions`, `DependencyInjection`, `Http`, `Internal`, and `Properties`).
+- Added typed GraphQL client registration and factory APIs: `ISitecoreGraphQLFactory<TClient>`, `ISitecoreGraphQLBuilder<TClient>`, `AddSitecoreGraphQL<TClient>(...)` (delegate and `IConfiguration` overloads), and fluent `.ConfigureAuthentication<TClient>(...)` / `.ConfigureAuthenticationSingleton<TClient>(...)` integrations built on `SitecoreAPIAuthorization` `1.1.0`.
+- Added per-type isolation across named `SitecoreGraphQLOptions` (with prefixed `SitecoreGraphQLOptionsValidator` error messages), dedicated named `HttpClient` and `HttpStandardResilienceOptions` pipelines (reconfigurable without handler stacking and coexisting cleanly with `AddHttpClient<TClient>()`), and typed `ISitecoreTokenCoordinator<TClient>`.
+- Added stateless `SitecoreTokenService`-guarded `CacheSize == 0` and staggered-`401` pre-check paths (`EventId = 1203`) on typed coordinators, plus one-time `EventId = 1202` `Information` logging on untyped `ISitecoreTokenService` fallback.
+- Added `client.type` (`typeof(TClient).ToString()`) tagging across `ActivitySource` spans and `Meter` instruments (with `sitecore.graphql.client_cache.evictions` emitting only `client.type` on typed factories).
+- Added Elephant-Goldfish Model (EGM) architectural contract documentation across the `src/` directory hierarchy (`src/README.md` blueprint and component package contracts for `Abstractions`, `DependencyInjection`, `Http`, `Internal`, and `Properties`) and design specification (`docs/designs/dotnet-11-and-typed-graphql-factory.md`).
+- Added comprehensive typed DI/coordinator/telemetry/validation unit tests (`TypedServiceCollectionExtensionsTests.cs`) and `.nuspec` TFM/dependency contract checks (`GitHubWorkflowTests.cs`).
+
+### Changed
+- Retargeted library, test, and benchmark projects to `.NET 10.0` (`net10.0`) and `.NET 11.0` (`net11.0`) with C# `15.0` and `.NET SDK 11.0.100`, dropping `.NET 8.0` and `.NET 9.0`.
+- Upgraded `SitecoreAPIAuthorization` to `1.1.0` and `Microsoft.Extensions.*` packages to `11.0.0` (centrally managed; consumers on `net10.0` receive the `11.0.0` `Microsoft.Extensions.*` package floor), and updated `BenchmarkDotNet` to `0.16.0-preview.2` across `.NET 10.0` and `.NET 11.0`.
+- Updated `SitecoreGraphQLDiagnostics` instrumentation version from `"1.0.0"` to `"1.1.0"` and removed the obsolete `net8.0` `#if NET9_0_OR_GREATER` conditional compilation branch in `SitecoreTokenHandler`.
 
 ## [1.0.0] - 2026-11-09
 

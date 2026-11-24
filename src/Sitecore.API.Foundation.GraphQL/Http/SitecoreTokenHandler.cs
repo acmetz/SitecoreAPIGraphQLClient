@@ -21,6 +21,8 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
     private readonly IOptions<SitecoreGraphQLOptions>? _staticOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
+    private readonly string? _optionsName;
+    private readonly string? _clientTypeName;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SitecoreTokenHandler"/> class.
@@ -47,16 +49,23 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
         ISitecoreTokenCoordinator coordinator,
         IOptionsMonitor<SitecoreGraphQLOptions> optionsMonitor,
         TimeProvider? timeProvider = null,
-        ILogger<SitecoreTokenHandler>? logger = null)
+        ILogger<SitecoreTokenHandler>? logger = null,
+        string? optionsName = null,
+        string? clientTypeName = null)
     {
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = (ILogger?)logger ?? NullLogger<SitecoreTokenHandler>.Instance;
+        _optionsName = string.IsNullOrEmpty(optionsName) ? null : optionsName;
+        _clientTypeName = string.IsNullOrWhiteSpace(clientTypeName) ? null : clientTypeName;
     }
 
     private SitecoreGraphQLOptions CurrentOptions
-        => _optionsMonitor?.CurrentValue ?? _staticOptions!.Value;
+        => (_optionsMonitor is not null
+            ? (string.IsNullOrEmpty(_optionsName) ? _optionsMonitor.CurrentValue : _optionsMonitor.Get(_optionsName))
+            : _staticOptions!.Value)
+           ?? throw new InvalidOperationException("SitecoreGraphQLOptions are not configured.");
 
     /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -181,12 +190,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
 
             try
             {
-#if NET9_0_OR_GREATER
                 await request.Content.LoadIntoBufferAsync(maxBufferBytes, cancellationToken).ConfigureAwait(false);
-#else
-                cancellationToken.ThrowIfCancellationRequested();
-                await request.Content.LoadIntoBufferAsync(maxBufferBytes).ConfigureAwait(false);
-#endif
                 return true;
             }
             catch (HttpRequestException) when (!cancellationToken.IsCancellationRequested)
@@ -296,7 +300,7 @@ public sealed class SitecoreTokenHandler : DelegatingHandler
                 lastRetryRequest = null;
 
                 Log.UnauthorizedRefreshAttempt(_logger, sanitizedEndpoint, attempt + 1, maxRetries);
-                SitecoreGraphQLDiagnostics.AuthRetries.Add(1, new KeyValuePair<string, object?>("client.name", clientTag));
+                SitecoreGraphQLDiagnostics.RecordClientCounter(SitecoreGraphQLDiagnostics.AuthRetries, clientTag, _clientTypeName);
 
                 (currentAuthToken, currentAccessToken) = await _coordinator.RefreshTokenAsync(
                     credentials,

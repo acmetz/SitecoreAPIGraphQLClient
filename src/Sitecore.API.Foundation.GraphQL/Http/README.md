@@ -6,13 +6,14 @@ HTTP delegating handler pipeline (`SitecoreTokenHandler.cs`) providing per-reque
 ## Interface
 - `SitecoreTokenHandler` (`SitecoreTokenHandler.cs`, namespace `Sitecore.API.Foundation.GraphQL.Http`):
   - `public SitecoreTokenHandler(ISitecoreTokenService tokenService, IOptions<SitecoreGraphQLOptions> options, ITokenValueAccessor tokenAccessor, ILogger<SitecoreTokenHandler>? logger = null)`: Public constructor wrapping `tokenService` and `tokenAccessor` in a `SitecoreTokenCoordinator` using `TimeProvider.System`.
-  - `internal SitecoreTokenHandler(ISitecoreTokenCoordinator coordinator, IOptionsMonitor<SitecoreGraphQLOptions> optionsMonitor, TimeProvider? timeProvider = null, ILogger<SitecoreTokenHandler>? logger = null)`: Internal DI constructor supporting live `IOptionsMonitor<SitecoreGraphQLOptions>` updates and injectable `TimeProvider`.
-  - `protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)`: Injects bearer tokens, buffers replayable payloads up to `MaxRetryBufferBytes`, and executes `401 Unauthorized` refresh and retry loops.
+  - `internal SitecoreTokenHandler(ISitecoreTokenCoordinator coordinator, IOptionsMonitor<SitecoreGraphQLOptions> optionsMonitor, TimeProvider? timeProvider = null, ILogger<SitecoreTokenHandler>? logger = null, string? optionsName = null, string? clientTypeName = null)`: Internal DI constructor supporting named `IOptionsMonitor<SitecoreGraphQLOptions>.Get(_optionsName)` isolation, `client.type` retry tagging, and injectable `TimeProvider`.
+  - `protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)`: Injects bearer tokens, buffers replayable payloads up to `MaxRetryBufferBytes` directly via `LoadIntoBufferAsync(maxBufferBytes, cancellationToken)`, and executes `401 Unauthorized` refresh and retry loops.
   - `public Task ForceRefreshAsync(CancellationToken cancellationToken)`: Proactively refreshes the default client token via `ISitecoreTokenCoordinator.RefreshTokenAsync` when default credentials are configured in options.
 
 ## Invariants
-- Registered as the outermost `DelegatingHandler` on the `SitecoreGraphQLFactory.NamedHttpClient` (`"SitecoreGraphQL"`) pipeline.
-- Resolves per-request credentials, `ClientName`, `IsExplicitClient`, `SanitizedEndpoint`, and `AllowPostRetries` from `HttpRequestMessage.Options` (`CredentialContext.OptionsKey`), falling back to `SitecoreGraphQLOptions` defaults. If neither provides valid credentials, logs `EventId = 1100` (`HandlerMissingCredentials`) and forwards the request unmodified.
+- Attached as the outermost `DelegatingHandler` on `SitecoreGraphQLFactory.NamedHttpClient` (`"SitecoreGraphQL"`) and per-type `$"SitecoreGraphQL.{typeName}"` pipelines (using the factory delegate overload on typed pipelines and a shared `ILogger<SitecoreTokenHandler>` logger category).
+- Resolves options from `_optionsMonitor.Get(_optionsName)` when `_optionsName` is non-empty (falling back to `_optionsMonitor.CurrentValue` or `_staticOptions.Value`).
+- Resolves per-request credentials, `ClientName`, `IsExplicitClient`, `SanitizedEndpoint`, and `AllowPostRetries` from `HttpRequestMessage.Options` (`CredentialContext.OptionsKey`), falling back to `SitecoreGraphQLOptions` defaults. If neither provides valid credentials, logs `EventId = 1100` (`HandlerMissingCredentials`) under `ILogger<SitecoreTokenHandler>` and forwards the request unmodified.
 - Pre-buffers outbound `request.Content` when `(maxRetries > 0 || allowPostRetries)` and `MaxRetryBufferBytes > 0`, up to `MaxRetryBufferBytes` (default `10 MB` / `10,485,760` bytes):
   - When `Headers.ContentLength` is known and exceeds `MaxRetryBufferBytes`, buffering is skipped and the original unbuffered content is sent once.
   - When `Headers.ContentLength` is unknown (`null`), `TryBufferUnknownLengthStreamAsync` reads up to `min(MaxRetryBufferBytes, Array.MaxLength - 2) + 1` bytes using an `8192`-byte `ArrayPool<byte>.Shared` rental. If the stream exceeds `MaxRetryBufferBytes`, the already-read prefix and unread stream remainder are stitched together via `PrefixedRemainingStream` (`StreamContent`) so the initial request still transmits the complete payload without truncating data or buffering the entire stream in memory.
@@ -24,7 +25,7 @@ HTTP delegating handler pipeline (`SitecoreTokenHandler.cs`) providing per-reque
 - Mutates outbound `request.Headers.Authorization` (`Bearer <accessToken>`) when a non-empty token is resolved.
 - Replaces `request.Content` with a reusable `ReadOnlyMemoryContent` (or `PrefixedRemainingStream` when an unknown-length stream exceeds `MaxRetryBufferBytes`) and disposes the replaced `HttpContent`.
 - Dispatches outbound HTTP requests through `base.SendAsync(request, cancellationToken)`.
-- Triggers asynchronous single-flight token acquisition and refresh via `ISitecoreTokenCoordinator` and increments `SitecoreGraphQLDiagnostics.AuthRetries` (`sitecore.graphql.auth.retries`) on `401` retry attempts.
+- Triggers asynchronous single-flight token acquisition and refresh via `ISitecoreTokenCoordinator` and records `SitecoreGraphQLDiagnostics.AuthRetries` (`sitecore.graphql.auth.retries`) with `client.name` (and `client.type` on typed handlers) on `401` retry attempts.
 - Emits structured log events (`EventId = 1100`–`1103`) via `Internal.Log`.
 
 ## Verification

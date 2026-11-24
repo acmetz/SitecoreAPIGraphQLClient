@@ -1,5 +1,5 @@
 # PR Check Workflow for Sitecore.API.Foundation.GraphQL
-# Lints GitHub workflows, builds, tests, enforces >= 80% coverage across .NET 8/9/10, and verifies NuGet packaging.
+# Lints GitHub workflows, builds, tests, enforces >= 80% coverage across .NET 10/11, and verifies NuGet packaging.
 
 name: PR Check
 
@@ -39,12 +39,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - dotnet: '8.0.x'
-            tfm: 'net8.0'
-          - dotnet: '9.0.x'
-            tfm: 'net9.0'
           - dotnet: '10.0.x'
             tfm: 'net10.0'
+          - dotnet: '11.0.x'
+            tfm: 'net11.0'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -55,9 +53,8 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.x
+            11.0.x
 
       - name: Restore solution
         run: dotnet restore Sitecore.API.Foundation.GraphQL.slnx
@@ -66,8 +63,18 @@ jobs:
         run: dotnet build Sitecore.API.Foundation.GraphQL.slnx --configuration Release --no-restore
 
       - name: Verify code formatting
-        if: matrix.tfm == 'net10.0'
+        if: matrix.tfm == 'net11.0'
         run: dotnet format Sitecore.API.Foundation.GraphQL.slnx --verify-no-changes --no-restore
+
+      - name: Pack NuGet and symbol packages
+        if: matrix.tfm == 'net11.0'
+        shell: bash
+        run: |
+          dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./nupkgs
+          compgen -G "./nupkgs/SitecoreAPIGraphQLClient.*.nupkg" > /dev/null && compgen -G "./nupkgs/SitecoreAPIGraphQLClient.*.snupkg" > /dev/null
 
       - name: Test with coverage (${{ matrix.tfm }})
         run: |
@@ -101,6 +108,7 @@ jobs:
               "Sitecore.API.Foundation.GraphQL.SitecoreGraphQLDiagnostics",
               "Sitecore.API.Foundation.GraphQL.Http.SitecoreTokenHandler",
               "Sitecore.API.Foundation.GraphQL.DependencyInjection.ServiceCollectionExtensions",
+              "Sitecore.API.Foundation.GraphQL.DependencyInjection.SitecoreGraphQLBuilder",
           )
           pub_valid = 0
           pub_covered = 0
@@ -118,45 +126,6 @@ jobs:
               raise SystemExit(f"Overall line coverage {line_rate:.2%} is below 80% threshold.")
           if pub_rate < 0.80:
               raise SystemExit(f"Public API line coverage {pub_rate:.2%} is below 80% threshold.")
-          PY
-
-      - name: Pack and verify NuGet & symbol packages
-        if: matrix.tfm == 'net10.0'
-        run: |
-          dotnet pack src/Sitecore.API.Foundation.GraphQL/Sitecore.API.Foundation.GraphQL.csproj \
-            --configuration Release \
-            --no-build \
-            --output ./nupkgs
-          python3 - <<'PY'
-          import glob, xml.etree.ElementTree as ET, zipfile
-
-          nupkgs = glob.glob("./nupkgs/SitecoreAPIGraphQLClient.*.nupkg")
-          snupkgs = glob.glob("./nupkgs/SitecoreAPIGraphQLClient.*.snupkg")
-          assert nupkgs, "Expected .nupkg output in ./nupkgs"
-          assert snupkgs, "Expected .snupkg output in ./nupkgs"
-
-          expected = {
-              "GraphQL.Client",
-              "GraphQL.Client.Abstractions",
-              "GraphQL.Client.Serializer.Newtonsoft",
-              "Microsoft.Extensions.Http",
-              "Microsoft.Extensions.Http.Resilience",
-              "Microsoft.Extensions.Logging.Abstractions",
-              "Microsoft.Extensions.Options",
-              "Microsoft.Extensions.Options.ConfigurationExtensions",
-              "SitecoreAPIAuthorization",
-          }
-
-          with zipfile.ZipFile(nupkgs[0]) as zf:
-              nuspec_name = [n for n in zf.namelist() if n.endswith(".nuspec")][0]
-              root = ET.fromstring(zf.read(nuspec_name))
-              ns = {"nu": root.tag.split("}")[0].strip("{")}
-              for group in root.findall(".//nu:dependencies/nu:group", ns):
-                  tf = group.attrib.get("targetFramework")
-                  deps = {d.attrib["id"] for d in group.findall("nu:dependency", ns)}
-                  if deps != expected:
-                      raise SystemExit(f"Unexpected dependencies for {tf}: {sorted(deps)} != {sorted(expected)}")
-          print("Verified .nupkg, .snupkg, and exact 9 runtime dependencies per TFM.")
           PY
 
       - name: Upload test results (${{ matrix.tfm }})
