@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sitecore.API.Foundation.Authorization.Abstractions;
 using Sitecore.API.Foundation.Authorization.Models;
+using Sitecore.API.Foundation.Authorization.Services;
 
 namespace Sitecore.API.Foundation.GraphQL.Internal;
 
@@ -25,23 +27,47 @@ internal interface ISitecoreTokenCoordinator
         bool isExplicitClient = false);
 }
 
-internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
+internal interface ISitecoreTokenCoordinator<TClient> : ISitecoreTokenCoordinator
+    where TClient : class
+{
+}
+
+internal class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
 {
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly ISitecoreTokenService? _directTokenService;
     private readonly ITokenValueAccessor _tokenAccessor;
     private readonly ILogger _logger;
+    private readonly string? _clientTypeName;
 
     private readonly ConcurrentDictionary<(string ClientId, string ClientSecret), InFlightRefresh> _inFlightRefreshes = new();
+
+    protected ILogger Logger => _logger;
+
+    protected SitecoreTokenCoordinator(
+        IServiceScopeFactory scopeFactory,
+        ITokenValueAccessor tokenAccessor,
+        ILogger? logger,
+        string? clientTypeName)
+    {
+        ArgumentNullException.ThrowIfNull(scopeFactory);
+        ArgumentNullException.ThrowIfNull(tokenAccessor);
+        _scopeFactory = scopeFactory;
+        _tokenAccessor = tokenAccessor;
+        _logger = logger ?? NullLogger<SitecoreTokenCoordinator>.Instance;
+        _clientTypeName = string.IsNullOrWhiteSpace(clientTypeName) ? null : clientTypeName;
+    }
 
     public SitecoreTokenCoordinator(
         IServiceScopeFactory scopeFactory,
         ITokenValueAccessor tokenAccessor,
         ILogger<SitecoreTokenCoordinator>? logger = null)
+        : this(
+            scopeFactory,
+            tokenAccessor,
+            (ILogger?)logger ?? NullLogger<SitecoreTokenCoordinator>.Instance,
+            clientTypeName: null)
     {
-        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _tokenAccessor = tokenAccessor ?? throw new ArgumentNullException(nameof(tokenAccessor));
-        _logger = (ILogger?)logger ?? NullLogger<SitecoreTokenCoordinator>.Instance;
     }
 
     public SitecoreTokenCoordinator(
@@ -54,6 +80,17 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         _logger = (ILogger?)logger ?? NullLogger<SitecoreTokenCoordinator>.Instance;
     }
 
+    protected virtual bool TryResolveTypedTokenService(
+        IServiceProvider serviceProvider,
+        [NotNullWhen(true)] out ISitecoreTokenService? tokenService)
+    {
+        tokenService = null;
+        return false;
+    }
+
+    protected virtual ISitecoreTokenService ResolveUntypedTokenService(IServiceProvider serviceProvider)
+        => serviceProvider.GetRequiredService<ISitecoreTokenService>();
+
     public async Task<(SitecoreAuthToken AuthToken, string AccessToken)> GetTokenAsync(
         SitecoreAuthClientCredentials credentials,
         string? clientName,
@@ -63,10 +100,10 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         cancellationToken.ThrowIfCancellationRequested();
 
         var clientTag = SitecoreGraphQLDiagnostics.GetClientTag(clientName, isExplicitClient);
-        SitecoreGraphQLDiagnostics.TokenRequests.Add(1, new KeyValuePair<string, object?>("client.name", clientTag));
+        SitecoreGraphQLDiagnostics.RecordClientCounter(SitecoreGraphQLDiagnostics.TokenRequests, clientTag, _clientTypeName);
 
         using var activity = SitecoreGraphQLDiagnostics.ActivitySource.StartActivity("SitecoreGraphQL.GetToken");
-        activity?.SetTag("client.name", clientTag);
+        SitecoreGraphQLDiagnostics.SetClientTags(activity, clientTag, _clientTypeName);
 
         if (_directTokenService is not null)
         {
@@ -77,7 +114,9 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         var scope = _scopeFactory!.CreateAsyncScope();
         await using (scope.ConfigureAwait(false))
         {
-            var tokenService = scope.ServiceProvider.GetRequiredService<ISitecoreTokenService>();
+            var tokenService = TryResolveTypedTokenService(scope.ServiceProvider, out var typed)
+                ? typed
+                : ResolveUntypedTokenService(scope.ServiceProvider);
             var token = await InvokeGetTokenAsync(tokenService, credentials, cancellationToken).ConfigureAwait(false);
             return (token, _tokenAccessor.GetAccessToken(token));
         }
@@ -201,6 +240,45 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         var scope = _scopeFactory!.CreateAsyncScope();
         await using (scope.ConfigureAwait(false))
         {
+            if (TryResolveTypedTokenService(scope.ServiceProvider, out var typedTokenService))
+            {
+                if (typedTokenService is SitecoreTokenService)
+                {
+                    var typedAuthCache = scope.ServiceProvider.GetService<Sitecore.API.Foundation.Authorization.Abstractions.ISitecoreTokenCache>();
+                    if (typedAuthCache is { CacheSize: 0 })
+                    {
+                        return await MeasureRefreshWithServiceAsync(
+                            typedTokenService,
+                            authCache: null,
+                            credentials,
+                            failedAuthToken,
+                            clientTag,
+                            cancellationToken,
+                            cacheKnownEmpty: true).ConfigureAwait(false);
+                    }
+
+                    if (failedAuthToken.HasValue && !string.IsNullOrEmpty(failedAccessToken))
+                    {
+                        var current = await InvokeGetTokenAsync(typedTokenService, credentials, cancellationToken).ConfigureAwait(false);
+                        var currentAccess = _tokenAccessor.GetAccessToken(current);
+                        if (!string.IsNullOrEmpty(currentAccess) &&
+                            !string.Equals(currentAccess, failedAccessToken, StringComparison.Ordinal))
+                        {
+                            Log.TypedTokenPreCheckReturnedDifferentToken(_logger, credentials.ClientId);
+                            return (current, currentAccess);
+                        }
+                    }
+                }
+
+                return await MeasureRefreshWithServiceAsync(
+                    typedTokenService,
+                    authCache: null,
+                    credentials,
+                    failedAuthToken,
+                    clientTag,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             var authCache = scope.ServiceProvider.GetService<Sitecore.API.Foundation.Authorization.Abstractions.ISitecoreTokenCache>();
             if (failedAuthToken.HasValue && !string.IsNullOrEmpty(failedAccessToken) && authCache is not null)
             {
@@ -218,7 +296,7 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
                 }
             }
 
-            var tokenService = scope.ServiceProvider.GetRequiredService<ISitecoreTokenService>();
+            var tokenService = ResolveUntypedTokenService(scope.ServiceProvider);
             return await MeasureRefreshWithServiceAsync(
                 tokenService,
                 authCache,
@@ -235,13 +313,14 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         SitecoreAuthClientCredentials credentials,
         SitecoreAuthToken? failedAuthToken,
         string clientTag,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool cacheKnownEmpty = false)
     {
         var startTimestamp = Stopwatch.GetTimestamp();
-        SitecoreGraphQLDiagnostics.TokenRefreshes.Add(1, new KeyValuePair<string, object?>("client.name", clientTag));
+        SitecoreGraphQLDiagnostics.RecordClientCounter(SitecoreGraphQLDiagnostics.TokenRefreshes, clientTag, _clientTypeName);
 
         using var activity = SitecoreGraphQLDiagnostics.ActivitySource.StartActivity("SitecoreGraphQL.RefreshToken");
-        activity?.SetTag("client.name", clientTag);
+        SitecoreGraphQLDiagnostics.SetClientTags(activity, clientTag, _clientTypeName);
 
         try
         {
@@ -250,14 +329,13 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
                 authCache,
                 credentials,
                 failedAuthToken,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                cacheKnownEmpty).ConfigureAwait(false);
         }
         finally
         {
             var elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
-            SitecoreGraphQLDiagnostics.TokenRefreshDurationMs.Record(
-                elapsedMs,
-                new KeyValuePair<string, object?>("client.name", clientTag));
+            SitecoreGraphQLDiagnostics.RecordTokenRefreshDuration(elapsedMs, clientTag, _clientTypeName);
         }
     }
 
@@ -266,8 +344,15 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
         Sitecore.API.Foundation.Authorization.Abstractions.ISitecoreTokenCache? authCache,
         SitecoreAuthClientCredentials credentials,
         SitecoreAuthToken? failedAuthToken,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool cacheKnownEmpty = false)
     {
+        if (cacheKnownEmpty)
+        {
+            var fresh = await InvokeGetTokenAsync(tokenService, credentials, cancellationToken).ConfigureAwait(false);
+            return (fresh, _tokenAccessor.GetAccessToken(fresh));
+        }
+
         SitecoreAuthToken? tokenToInvalidate = failedAuthToken;
         SitecoreAuthToken? preFetchedToken = null;
 
@@ -466,5 +551,49 @@ internal sealed class SitecoreTokenCoordinator : ISitecoreTokenCoordinator
 
             _cts?.Dispose();
         }
+    }
+}
+
+internal sealed class SitecoreTokenCoordinator<TClient> : SitecoreTokenCoordinator, ISitecoreTokenCoordinator<TClient>
+    where TClient : class
+{
+    private static readonly string ClientTypeName = typeof(TClient).ToString();
+    private int _loggedUntypedFallback;
+
+    public SitecoreTokenCoordinator(
+        IServiceScopeFactory scopeFactory,
+        ITokenValueAccessor tokenAccessor,
+        ILogger<SitecoreTokenCoordinator<TClient>>? logger = null)
+        : base(
+            scopeFactory,
+            tokenAccessor,
+            (ILogger?)logger ?? NullLogger<SitecoreTokenCoordinator<TClient>>.Instance,
+            ClientTypeName)
+    {
+    }
+
+    protected override bool TryResolveTypedTokenService(
+        IServiceProvider serviceProvider,
+        [NotNullWhen(true)] out ISitecoreTokenService? tokenService)
+    {
+        tokenService = serviceProvider.GetService<ISitecoreTokenService<TClient>>();
+        return tokenService is not null;
+    }
+
+    protected override ISitecoreTokenService ResolveUntypedTokenService(IServiceProvider serviceProvider)
+    {
+        var fallback = serviceProvider.GetService<ISitecoreTokenService>();
+        if (fallback is not null)
+        {
+            if (Interlocked.Exchange(ref _loggedUntypedFallback, 1) == 0)
+            {
+                Log.TypedTokenServiceFallbackToUntyped(Logger, ClientTypeName);
+            }
+
+            return fallback;
+        }
+
+        throw new InvalidOperationException(
+            $"No ISitecoreTokenService<{ClientTypeName}> or fallback ISitecoreTokenService is registered in DI. Call .ConfigureAuthentication(...) (or services.AddSitecoreAuthentication<{ClientTypeName}>()) for per-type authentication, or services.AddSitecoreAuthentication(...) for shared authentication.");
     }
 }

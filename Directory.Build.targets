@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <!-- Disable parallel multi-TFM inner builds to prevent file-lock races in .NET 10 SDK -->
+    <!-- Disable parallel multi-TFM inner builds to prevent file-lock races in .NET 10/11 SDKs -->
     <BuildInParallel Condition="'$(TargetFrameworks)' != ''">false</BuildInParallel>
 
     <!-- Suppress missing XML doc warnings for non-packable test and benchmark projects -->

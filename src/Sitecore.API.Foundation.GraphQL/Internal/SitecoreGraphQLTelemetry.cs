@@ -91,6 +91,18 @@ internal static partial class Log
     public static partial void TokenRefreshFallbackToGet(ILogger logger, string clientId);
 
     [LoggerMessage(
+        EventId = 1202,
+        Level = LogLevel.Information,
+        Message = "No typed ISitecoreTokenService registered for {ClientType}; falling back to untyped ISitecoreTokenService.")]
+    public static partial void TypedTokenServiceFallbackToUntyped(ILogger logger, string clientType);
+
+    [LoggerMessage(
+        EventId = 1203,
+        Level = LogLevel.Debug,
+        Message = "Typed token pre-check returned a different token for clientId {ClientId}; skipping TryRefreshSitecoreAuthToken.")]
+    public static partial void TypedTokenPreCheckReturnedDifferentToken(ILogger logger, string clientId);
+
+    [LoggerMessage(
         EventId = 1300,
         Level = LogLevel.Warning,
         Message = "Cannot refresh Sitecore token via obsolete ISitecoreTokenCache adapter due to missing ClientId/ClientSecret in options.")]

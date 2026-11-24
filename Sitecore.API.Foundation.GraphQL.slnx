@@ -6,6 +6,7 @@
   </Configurations>
   <Folder Name="/docs/">
     <File Path="docs/README.md" />
+    <File Path="docs/designs/dotnet-11-and-typed-graphql-factory.md" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".actrc" />

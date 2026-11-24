@@ -14,8 +14,8 @@ public static class SitecoreGraphQLDiagnostics
     /// </summary>
     public const string InstrumentationName = "Sitecore.API.Foundation.GraphQL";
 
-    internal static readonly ActivitySource ActivitySource = new(InstrumentationName, "1.0.0");
-    internal static readonly Meter Meter = new(InstrumentationName, "1.0.0");
+    internal static readonly ActivitySource ActivitySource = new(InstrumentationName, "1.1.0");
+    internal static readonly Meter Meter = new(InstrumentationName, "1.1.0");
 
     internal static readonly Counter<long> TokenRequests = Meter.CreateCounter<long>(
         "sitecore.graphql.token.requests",
@@ -46,5 +46,61 @@ public static class SitecoreGraphQLDiagnostics
         }
 
         return isExplicit ? "explicit" : "default";
+    }
+
+    internal static void RecordClientCounter(Counter<long> counter, string clientTag, string? clientTypeName)
+    {
+        if (!string.IsNullOrEmpty(clientTypeName))
+        {
+            counter.Add(
+                1,
+                new KeyValuePair<string, object?>("client.name", clientTag),
+                new KeyValuePair<string, object?>("client.type", clientTypeName));
+        }
+        else
+        {
+            counter.Add(1, new KeyValuePair<string, object?>("client.name", clientTag));
+        }
+    }
+
+    internal static void RecordTokenRefreshDuration(double elapsedMs, string clientTag, string? clientTypeName)
+    {
+        if (!string.IsNullOrEmpty(clientTypeName))
+        {
+            TokenRefreshDurationMs.Record(
+                elapsedMs,
+                new KeyValuePair<string, object?>("client.name", clientTag),
+                new KeyValuePair<string, object?>("client.type", clientTypeName));
+        }
+        else
+        {
+            TokenRefreshDurationMs.Record(elapsedMs, new KeyValuePair<string, object?>("client.name", clientTag));
+        }
+    }
+
+    internal static void RecordClientCacheEviction(string? clientTypeName)
+    {
+        if (!string.IsNullOrEmpty(clientTypeName))
+        {
+            ClientCacheEvictions.Add(1, new KeyValuePair<string, object?>("client.type", clientTypeName));
+        }
+        else
+        {
+            ClientCacheEvictions.Add(1);
+        }
+    }
+
+    internal static void SetClientTags(Activity? activity, string clientTag, string? clientTypeName)
+    {
+        if (activity is null)
+        {
+            return;
+        }
+
+        activity.SetTag("client.name", clientTag);
+        if (!string.IsNullOrEmpty(clientTypeName))
+        {
+            activity.SetTag("client.type", clientTypeName);
+        }
     }
 }

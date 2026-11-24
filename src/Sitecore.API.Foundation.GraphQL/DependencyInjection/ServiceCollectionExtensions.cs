@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly;
+using Sitecore.API.Foundation.Authorization.DependencyInjection;
 using Sitecore.API.Foundation.GraphQL.Http;
 using Sitecore.API.Foundation.GraphQL.Internal;
 
@@ -16,7 +18,10 @@ namespace Sitecore.API.Foundation.GraphQL.DependencyInjection;
 /// </summary>
 public static class ServiceCollectionExtensions
 {
-    private const string SectionName = "Sitecore:GraphQL";
+    internal const string SectionName = "Sitecore:GraphQL";
+    private const string OptionsNamePrefix = "Sitecore.API.Foundation.GraphQL.Options";
+
+    private static readonly ConditionalWeakTable<IServiceCollection, ConcurrentDictionary<Type, object>> TypedBuilders = new();
 
     internal static void TryAddInternalLogging(this IServiceCollection services)
     {
@@ -102,37 +107,213 @@ public static class ServiceCollectionExtensions
         var optionsBuilder = services.AddOptions<SitecoreGraphQLOptions>();
         if (configure is not null)
         {
-            var gate = new object();
-            SitecoreGraphQLOptions? cachedBefore = null;
-            SitecoreGraphQLOptions? cachedAfter = null;
-            var cachedAssignedMask = GraphQLOptionsAssignedMask.None;
-            Dictionary<string, GraphQLClientOptionsAssignedMask>? cachedClientMasks = null;
-
-            optionsBuilder.Configure(target =>
-            {
-                lock (gate)
-                {
-                    if (cachedAfter is null)
-                    {
-                        var before = CloneOptions(target);
-                        var initialClients = CaptureClientReferences(target.Clients);
-                        target.ResetAssignmentTracking();
-                        configure(target);
-                        cachedBefore = before;
-                        cachedAssignedMask = target.AssignedMask;
-                        cachedClientMasks = CaptureClientMasks(target.Clients, initialClients);
-                        cachedAfter = CloneOptions(target);
-                        return;
-                    }
-
-                    ApplyConfiguredChanges(cachedBefore!, cachedAfter, cachedAssignedMask, cachedClientMasks, target);
-                }
-            });
+            ConfigureOptionsWithDeltaTracking(optionsBuilder, configure);
         }
 
         optionsBuilder.ValidateOnStart();
 
         return AddCore(services, enableLogging: true, configureResilience, configureClient);
+    }
+
+    /// <summary>
+    /// Registers an isolated typed <see cref="ISitecoreGraphQLFactory{TClient}"/>, HTTP pipeline, and named options
+    /// for <typeparamref name="TClient"/> using an optional configuration delegate.
+    /// </summary>
+    /// <typeparam name="TClient">The consumer class type used to isolate options, HTTP pipeline, and typed token coordination.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Optional configuration delegate for <see cref="SitecoreGraphQLOptions"/>.</param>
+    /// <returns>An <see cref="ISitecoreGraphQLBuilder{TClient}"/> for further configuring options, authentication, resilience, and HTTP client behavior.</returns>
+    /// <remarks>
+    /// Repeated calls for the same <typeparamref name="TClient"/> are idempotent and return the existing builder without stacking
+    /// duplicate handlers. Setting <see cref="SitecoreGraphQLOptions.EnableInternalLoggingSetup"/> to <c>false</c> inside
+    /// <paramref name="configure"/> does not suppress internal logging registration; use
+    /// <see cref="AddSitecoreGraphQL{TClient}(IServiceCollection, IConfiguration, string)"/> when skipping logging setup is required.
+    /// </remarks>
+    public static ISitecoreGraphQLBuilder<TClient> AddSitecoreGraphQL<TClient>(
+        this IServiceCollection services,
+        Action<SitecoreGraphQLOptions>? configure = null)
+        where TClient : class
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var builder = AddTypedCore<TClient>(services, enableLogging: true);
+        if (configure is not null)
+        {
+            builder.ConfigureOptions(configure);
+        }
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers an isolated typed <see cref="ISitecoreGraphQLFactory{TClient}"/>, HTTP pipeline, and named options
+    /// for <typeparamref name="TClient"/> bound from a configuration section.
+    /// </summary>
+    /// <typeparam name="TClient">The consumer class type used to isolate options, HTTP pipeline, and typed token coordination.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">The application configuration instance.</param>
+    /// <param name="sectionName">The configuration section path to bind. Defaults to <c>Sitecore:GraphQL</c>.</param>
+    /// <returns>An <see cref="ISitecoreGraphQLBuilder{TClient}"/> for further configuring options, authentication, resilience, and HTTP client behavior.</returns>
+    /// <remarks>
+    /// Repeated calls for the same <typeparamref name="TClient"/> are idempotent and return the existing builder without stacking
+    /// duplicate handlers. <see cref="SitecoreGraphQLOptions.EnableInternalLoggingSetup"/> is evaluated from the initial configuration section
+    /// bound by this method.
+    /// </remarks>
+    public static ISitecoreGraphQLBuilder<TClient> AddSitecoreGraphQL<TClient>(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string sectionName = SectionName)
+        where TClient : class
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sectionName);
+
+        var snapshot = new SitecoreGraphQLOptions();
+        configuration.GetSection(sectionName).Bind(snapshot);
+
+        var builder = AddTypedCore<TClient>(services, enableLogging: snapshot.EnableInternalLoggingSetup);
+        builder.ConfigureOptions(configuration, sectionName);
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers typed Sitecore authentication services (<c>ISitecoreTokenService&lt;TClient&gt;</c>) using the default lifetime
+    /// in <c>SitecoreAPIAuthorization</c> and allows configuring per-type authentication options and HTTP behavior.
+    /// </summary>
+    /// <typeparam name="TClient">The consumer class type whose authentication service and <c>AuthTokenUrl</c> pipeline are configured.</typeparam>
+    /// <param name="builder">The typed Sitecore GraphQL builder.</param>
+    /// <param name="configureAuth">Optional delegate to configure the <see cref="ISitecoreAuthenticationBuilder{TClient}"/>.</param>
+    /// <returns>The same <see cref="ISitecoreGraphQLBuilder{TClient}"/> instance for chaining.</returns>
+    /// <remarks>
+    /// Lifetime registration follows first-registration-wins semantics in DI; pair with <see cref="ConfigureAuthenticationSingleton{TClient}"/>
+    /// only intentionally and configure <c>AuthTokenUrl</c> consistently because Singleton registrations capture it at startup.
+    /// Note that shared/untyped token cache sizing defaults to <c>MaxCacheSize = 10</c> on unnamed <c>SitecoreAPIAuthorization</c> options.
+    /// </remarks>
+    public static ISitecoreGraphQLBuilder<TClient> ConfigureAuthentication<TClient>(
+        this ISitecoreGraphQLBuilder<TClient> builder,
+        Action<ISitecoreAuthenticationBuilder<TClient>>? configureAuth = null)
+        where TClient : class
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        var authBuilder = builder.Services.AddSitecoreAuthentication<TClient>();
+        configureAuth?.Invoke(authBuilder);
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers typed Sitecore authentication services (<c>ISitecoreTokenService&lt;TClient&gt;</c>) with singleton lifetime
+    /// in <c>SitecoreAPIAuthorization</c> and allows configuring per-type authentication options and HTTP behavior.
+    /// </summary>
+    /// <typeparam name="TClient">The consumer class type whose authentication service and <c>AuthTokenUrl</c> pipeline are configured.</typeparam>
+    /// <param name="builder">The typed Sitecore GraphQL builder.</param>
+    /// <param name="configureAuth">Optional delegate to configure the <see cref="ISitecoreAuthenticationBuilder{TClient}"/>.</param>
+    /// <returns>The same <see cref="ISitecoreGraphQLBuilder{TClient}"/> instance for chaining.</returns>
+    /// <remarks>
+    /// Lifetime registration follows first-registration-wins semantics in DI. Singleton <c>SitecoreTokenService&lt;TClient&gt;</c>
+    /// instances capture <c>AuthTokenUrl</c> snapshots via <c>HttpClient</c> setup; note that unnamed <c>SitecoreAPIAuthorization</c>
+    /// options govern shared cache capacity (<c>MaxCacheSize = 10</c> by default).
+    /// </remarks>
+    public static ISitecoreGraphQLBuilder<TClient> ConfigureAuthenticationSingleton<TClient>(
+        this ISitecoreGraphQLBuilder<TClient> builder,
+        Action<ISitecoreAuthenticationBuilder<TClient>>? configureAuth = null)
+        where TClient : class
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        var authBuilder = builder.Services.AddSitecoreAuthenticationSingleton<TClient>();
+        configureAuth?.Invoke(authBuilder);
+        return builder;
+    }
+
+    internal static void ConfigureOptionsWithDeltaTracking(
+        OptionsBuilder<SitecoreGraphQLOptions> optionsBuilder,
+        Action<SitecoreGraphQLOptions> configure)
+    {
+        var gate = new object();
+        SitecoreGraphQLOptions? cachedBefore = null;
+        SitecoreGraphQLOptions? cachedAfter = null;
+        var cachedAssignedMask = GraphQLOptionsAssignedMask.None;
+        Dictionary<string, GraphQLClientOptionsAssignedMask>? cachedClientMasks = null;
+
+        optionsBuilder.Configure(target =>
+        {
+            lock (gate)
+            {
+                if (cachedAfter is null)
+                {
+                    var before = CloneOptions(target);
+                    var initialClients = CaptureClientReferences(target.Clients);
+                    target.ResetAssignmentTracking();
+                    configure(target);
+                    cachedBefore = before;
+                    cachedAssignedMask = target.AssignedMask;
+                    cachedClientMasks = CaptureClientMasks(target.Clients, initialClients);
+                    cachedAfter = CloneOptions(target);
+                    return;
+                }
+
+                ApplyConfiguredChanges(cachedBefore!, cachedAfter, cachedAssignedMask, cachedClientMasks, target);
+            }
+        });
+    }
+
+    private static ISitecoreGraphQLBuilder<TClient> AddTypedCore<TClient>(
+        IServiceCollection services,
+        bool enableLogging)
+        where TClient : class
+    {
+        if (enableLogging)
+        {
+            services.TryAddInternalLogging();
+        }
+
+        var typeName = typeof(TClient).AssemblyQualifiedName ?? typeof(TClient).FullName ?? typeof(TClient).Name;
+        var clientTypeName = typeof(TClient).ToString();
+        var httpClientName = $"{SitecoreGraphQLFactory.NamedHttpClient}.{typeName}";
+        var optionsName = $"{OptionsNamePrefix}.{typeName}";
+
+        services.AddOptions<SitecoreGraphQLOptions>(optionsName)
+            .ValidateOnStart();
+
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<SitecoreGraphQLOptions>, SitecoreGraphQLOptionsValidator>());
+
+        services.TryAddSingleton<ITokenValueAccessor, DefaultTokenValueAccessor>();
+
+        var httpBuilder = services.AddHttpClient(httpClientName);
+        var builders = TypedBuilders.GetOrCreateValue(services);
+        var candidate = new SitecoreGraphQLBuilder<TClient>(services, httpBuilder, optionsName);
+        var winning = (SitecoreGraphQLBuilder<TClient>)builders.GetOrAdd(typeof(TClient), candidate);
+
+        if (ReferenceEquals(winning, candidate))
+        {
+            // Use the factory delegate overload instead of services.AddTransient<SitecoreTokenHandler>
+            // so untyped and sibling typed pipelines do not collide on DI handler resolution.
+            httpBuilder.AddHttpMessageHandler(sp => new SitecoreTokenHandler(
+                sp.GetRequiredService<ISitecoreTokenCoordinator<TClient>>(),
+                sp.GetRequiredService<IOptionsMonitor<SitecoreGraphQLOptions>>(),
+                sp.GetService<TimeProvider>(),
+                sp.GetService<ILogger<SitecoreTokenHandler>>(),
+                optionsName,
+                clientTypeName));
+        }
+
+        services.TryAddSingleton<ISitecoreTokenCoordinator<TClient>>(sp => new SitecoreTokenCoordinator<TClient>(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<ITokenValueAccessor>(),
+            sp.GetService<ILogger<SitecoreTokenCoordinator<TClient>>>()));
+
+        services.TryAddSingleton<ISitecoreGraphQLFactory<TClient>>(sp => new SitecoreGraphQLFactory<TClient>(
+            sp.GetRequiredService<ISitecoreTokenCoordinator<TClient>>(),
+            sp.GetRequiredService<IOptionsMonitor<SitecoreGraphQLOptions>>(),
+            sp.GetRequiredService<IHttpClientFactory>(),
+            optionsName,
+            httpClientName,
+            sp.GetService<ILogger<SitecoreGraphQLFactory<TClient>>>()));
+
+        return winning;
     }
 
     private static IServiceCollection AddCore(
@@ -173,7 +354,7 @@ public static class ServiceCollectionExtensions
 
         if (configureResilience is not null)
         {
-            ConfigureResiliencePipeline(httpBuilder, configureResilience);
+            AddStandardResiliencePipeline(httpBuilder, optionsName: null).Configure(configureResilience);
         }
 
         configureClient?.Invoke(httpBuilder);
@@ -187,9 +368,9 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    private static void ConfigureResiliencePipeline(
+    internal static IHttpStandardResiliencePipelineBuilder AddStandardResiliencePipeline(
         IHttpClientBuilder httpBuilder,
-        Action<HttpStandardResilienceOptions> configureResilience)
+        string? optionsName)
     {
         var resilienceBuilder = httpBuilder.AddStandardResilienceHandler();
 
@@ -214,9 +395,12 @@ public static class ServiceCollectionExtensions
 
                         if (method == HttpMethod.Post)
                         {
+                            var resolvedOptions = string.IsNullOrEmpty(optionsName)
+                                ? graphQlOptionsMonitor.CurrentValue
+                                : graphQlOptionsMonitor.Get(optionsName);
                             var allowPost = request.Options.TryGetValue(CredentialContext.OptionsKey, out var ctx)
                                 ? ctx.AllowPostRetries
-                                : graphQlOptionsMonitor.CurrentValue.AllowPostRetries;
+                                : resolvedOptions.AllowPostRetries;
                             if (!allowPost)
                             {
                                 return false;
@@ -226,8 +410,6 @@ public static class ServiceCollectionExtensions
 
                     return await defaultShouldHandle(args).ConfigureAwait(false);
                 };
-
-                configureResilience(options);
             });
 
 #pragma warning disable EXTEXP0001 // SelectPipelineBy is used to partition circuit breakers per (authority, client)
@@ -248,7 +430,10 @@ public static class ServiceCollectionExtensions
                 var partitionKey = ctx.ResiliencePartitionKey;
                 if (ctx.IsExplicitClient && !knownDynamicPartitions.ContainsKey(partitionKey))
                 {
-                    var maxDynamicPartitions = Math.Max(1, optionsMonitor.CurrentValue.MaxCachedClients);
+                    var resolvedOptions = string.IsNullOrEmpty(optionsName)
+                        ? optionsMonitor.CurrentValue
+                        : optionsMonitor.Get(optionsName);
+                    var maxDynamicPartitions = Math.Max(1, resolvedOptions.MaxCachedClients);
                     lock (partitionGate)
                     {
                         if (!knownDynamicPartitions.ContainsKey(partitionKey))
@@ -267,6 +452,8 @@ public static class ServiceCollectionExtensions
             };
         });
 #pragma warning restore EXTEXP0001
+
+        return resilienceBuilder;
     }
 
     private static SitecoreGraphQLOptions CloneOptions(SitecoreGraphQLOptions source)

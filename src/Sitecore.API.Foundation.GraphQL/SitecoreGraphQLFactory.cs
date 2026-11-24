@@ -26,6 +26,9 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
     private readonly IOptions<SitecoreGraphQLOptions>? _staticOptions;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger _logger;
+    private readonly string _httpClientName = NamedHttpClient;
+    private readonly string? _optionsName;
+    private readonly string? _clientTypeName;
 #pragma warning disable CS0618 // Retained for v0.9.x legacy 5-parameter constructor compatibility
     private readonly ISitecoreTokenCache? _legacyTokenCache;
 #pragma warning restore CS0618
@@ -66,16 +69,25 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
         ISitecoreTokenCoordinator coordinator,
         IOptionsMonitor<SitecoreGraphQLOptions> optionsMonitor,
         IHttpClientFactory httpClientFactory,
-        ILogger<SitecoreGraphQLFactory>? logger = null)
+        ILogger? logger = null,
+        string? optionsName = null,
+        string httpClientName = NamedHttpClient,
+        string? clientTypeName = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(httpClientName);
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _logger = (ILogger?)logger ?? NullLogger<SitecoreGraphQLFactory>.Instance;
+        _logger = logger ?? NullLogger<SitecoreGraphQLFactory>.Instance;
+        _httpClientName = httpClientName;
+        _optionsName = string.IsNullOrEmpty(optionsName) ? null : optionsName;
+        _clientTypeName = string.IsNullOrWhiteSpace(clientTypeName) ? null : clientTypeName;
     }
 
     private SitecoreGraphQLOptions CurrentOptions
-        => (_optionsMonitor?.CurrentValue ?? _staticOptions?.Value)
+        => (_optionsMonitor is not null
+            ? (string.IsNullOrEmpty(_optionsName) ? _optionsMonitor.CurrentValue : _optionsMonitor.Get(_optionsName))
+            : _staticOptions?.Value)
            ?? throw new InvalidOperationException("SitecoreGraphQLOptions are not configured.");
 
     /// <inheritdoc />
@@ -460,7 +472,7 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
                     .Remove(new KeyValuePair<ClientCacheKey, Lazy<CachedClientEntry>>(oldestKey, oldestEntry)))
                 {
                     // Intentionally do not Dispose() the evicted socket-free wrapper so in-flight callers never hit ObjectDisposedException.
-                    SitecoreGraphQLDiagnostics.ClientCacheEvictions.Add(1);
+                    SitecoreGraphQLDiagnostics.RecordClientCacheEviction(_clientTypeName);
                     Log.EvictedDynamicGraphQLClient(_logger, EndpointUriValidator.SanitizeForLogging(oldestKey.NormalizedUrl), maxCachedClients);
                 }
             }
@@ -483,7 +495,7 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
             allowPostRetries);
 
 #pragma warning disable CA2000 // GraphQLHttpClient(options, serializer) takes ownership of options.HttpMessageHandler and disposes it when the client is disposed.
-        var forwardingHandler = new CredentialForwardingHandler(_httpClientFactory, NamedHttpClient, credentialContext);
+        var forwardingHandler = new CredentialForwardingHandler(_httpClientFactory, _httpClientName, credentialContext);
 #pragma warning restore CA2000
 
         var clientOptions = new GraphQLHttpClientOptions
@@ -534,5 +546,35 @@ public class SitecoreGraphQLFactory : ISitecoreGraphQLFactory, IDisposable
             throwInvalidOperation: true);
 
         return (normalizedUrl, rawUrl, new SitecoreAuthClientCredentials(rawId, rawSecret), allowPostRetries);
+    }
+}
+
+internal sealed class SitecoreGraphQLFactory<TClient> : SitecoreGraphQLFactory, ISitecoreGraphQLFactory<TClient>
+    where TClient : class
+{
+    private static readonly string ClientTypeName = typeof(TClient).ToString();
+
+    internal SitecoreGraphQLFactory(
+        ISitecoreTokenCoordinator<TClient> coordinator,
+        IOptionsMonitor<SitecoreGraphQLOptions> optionsMonitor,
+        IHttpClientFactory httpClientFactory,
+        string optionsName,
+        string httpClientName,
+        ILogger<SitecoreGraphQLFactory<TClient>>? logger = null)
+        : base(
+            coordinator,
+            optionsMonitor,
+            httpClientFactory,
+            (ILogger?)logger ?? NullLogger<SitecoreGraphQLFactory<TClient>>.Instance,
+            ValidateOptionsName(optionsName),
+            httpClientName,
+            ClientTypeName)
+    {
+    }
+
+    private static string ValidateOptionsName(string optionsName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(optionsName);
+        return optionsName;
     }
 }

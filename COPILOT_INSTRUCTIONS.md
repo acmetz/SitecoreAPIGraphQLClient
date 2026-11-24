@@ -18,7 +18,7 @@ These instructions define how the coding assistant ("the agent") must operate fo
    - Refactor only after tests pass.
 
 2. **Multi-Target Compatibility**
-   - Always compile for `net8.0`, `net9.0`, and `net10.0` (`.NET 8.0` through the latest supported `.NET` version).
+   - Always compile for `net10.0` and `net11.0` (`.NET 10.0` and `.NET 11.0`, C# `15.0`, `.NET SDK 11.0.100`).
    - Tests must run and pass for **all targeted frameworks**.
    - Manage package versions centrally in `Directory.Packages.props`.
 
@@ -45,7 +45,7 @@ These instructions define how the coding assistant ("the agent") must operate fo
    - **Pattern**: Arrange-Act-Assert
 
 7. **CI Expectations**
-   - CI matrix runs on all targeted .NET versions (`net8.0`, `net9.0`, `net10.0`) plus `actionlint` workflow validation.
+   - CI matrix runs on all targeted .NET versions (`net10.0` and `net11.0`) plus `actionlint` workflow validation.
    - All tests must pass; line coverage >= 80% on `Sitecore.API.Foundation.GraphQL` and public API types.
 
 8. **Git Hygiene**

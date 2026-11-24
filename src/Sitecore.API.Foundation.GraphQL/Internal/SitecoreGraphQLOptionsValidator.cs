@@ -8,7 +8,10 @@ internal sealed class SitecoreGraphQLOptionsValidator : IValidateOptions<Sitecor
     {
         if (options is null)
         {
-            return ValidateOptionsResult.Fail("SitecoreGraphQLOptions cannot be null.");
+            var message = string.IsNullOrEmpty(name)
+                ? "SitecoreGraphQLOptions cannot be null."
+                : $"[{name}] SitecoreGraphQLOptions cannot be null.";
+            return ValidateOptionsResult.Fail(message);
         }
 
         List<string>? failures = null;
@@ -75,9 +78,20 @@ internal sealed class SitecoreGraphQLOptionsValidator : IValidateOptions<Sitecor
             }
         }
 
-        return failures is { Count: > 0 }
-            ? ValidateOptionsResult.Fail(failures)
-            : ValidateOptionsResult.Success;
+        if (failures is { Count: > 0 })
+        {
+            if (!string.IsNullOrEmpty(name))
+            {
+                for (var i = 0; i < failures.Count; i++)
+                {
+                    failures[i] = $"[{name}] {failures[i]}";
+                }
+            }
+
+            return ValidateOptionsResult.Fail(failures);
+        }
+
+        return ValidateOptionsResult.Success;
     }
 }
 

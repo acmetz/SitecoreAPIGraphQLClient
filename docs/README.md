@@ -1,6 +1,6 @@
 # SitecoreAPIGraphQLClient — Extended Developer and Architecture Guide
 
-This guide covers multi-tenant configuration, security hardening, HTTP resilience, token refresh coordination, serialization, observability, and operational best practices for `SitecoreAPIGraphQLClient` (`Sitecore.API.Foundation.GraphQL` `1.0.0`).
+This guide covers multi-tenant configuration, typed client registrations, security hardening, HTTP resilience, token refresh coordination, serialization, observability, and operational best practices for `SitecoreAPIGraphQLClient` (`Sitecore.API.Foundation.GraphQL` `1.1.0`).
 
 ---
 
@@ -8,21 +8,23 @@ This guide covers multi-tenant configuration, security hardening, HTTP resilienc
 
 1. [Architecture Overview](#architecture-overview)
 2. [Two-Package Setup and DI Lifetimes](#two-package-setup-and-di-lifetimes)
-3. [Named Clients and Configuration Inheritance](#named-clients-and-configuration-inheritance)
-4. [Multi-Tenant Explicit Credentials and Client Caching](#multi-tenant-explicit-credentials-and-client-caching)
-5. [Endpoint Security and Internal Container HTTP](#endpoint-security-and-internal-container-http)
-6. [HTTP 401 Recovery and Payload Buffering](#http-401-recovery-and-payload-buffering)
-7. [Opt-In HTTP Resilience and POST Retry Safety](#opt-in-http-resilience-and-post-retry-safety)
-8. [Newtonsoft.Json Serialization and GUID Handling](#newtonsoftjson-serialization-and-guid-handling)
-9. [Observability (Logging, Metrics, and Tracing)](#observability-logging-metrics-and-tracing)
-10. [Known Scope Boundaries](#known-scope-boundaries)
-11. [Migration Notes from v0.9.x to v1.0.0](#migration-notes-from-v09x-to-v100)
+3. [Typed Client Registrations](#typed-client-registrations)
+4. [Named Clients and Configuration Inheritance](#named-clients-and-configuration-inheritance)
+5. [Multi-Tenant Explicit Credentials and Client Caching](#multi-tenant-explicit-credentials-and-client-caching)
+6. [Endpoint Security and Internal Container HTTP](#endpoint-security-and-internal-container-http)
+7. [HTTP 401 Recovery and Payload Buffering](#http-401-recovery-and-payload-buffering)
+8. [Opt-In HTTP Resilience and POST Retry Safety](#opt-in-http-resilience-and-post-retry-safety)
+9. [Newtonsoft.Json Serialization and GUID Handling](#newtonsoftjson-serialization-and-guid-handling)
+10. [Observability (Logging, Metrics, and Tracing)](#observability-logging-metrics-and-tracing)
+11. [Known Scope Boundaries](#known-scope-boundaries)
+12. [Migration Notes from v0.9.x to v1.0.0](#migration-notes-from-v09x-to-v100)
+13. [Migration Notes from v1.0.0 to v1.1.0](#migration-notes-from-v100-to-v110)
 
 ---
 
 ## Architecture Overview
 
-`SitecoreAPIGraphQLClient` layers per-client GraphQL management over [`SitecoreAPIAuthorization`](https://www.nuget.org/packages/SitecoreAPIAuthorization) `1.0.0` (`ISitecoreTokenService`):
+`SitecoreAPIGraphQLClient` layers per-client GraphQL management over [`SitecoreAPIAuthorization`](https://www.nuget.org/packages/SitecoreAPIAuthorization) `1.1.0` (`ISitecoreTokenService` and `ISitecoreTokenService<TClient>`):
 
 1. **`SitecoreGraphQLFactory`** validates URLs and credentials synchronously and caches `GraphQLHttpClient` instances (`NewtonsoftJsonSerializer`) keyed by canonical endpoint URL, `ClientId`, `ClientSecret`, optional client name, and retry policy.
 2. **`CredentialForwardingHandler`** is a lightweight socket-free `HttpMessageHandler` attached to each cached `GraphQLHttpClient`. For every outbound GraphQL query or mutation, it creates a shallow `HttpRequestMessage` envelope, stamps a secret-masked `CredentialContext` into `HttpRequestMessage.Options`, shares `request.Content` by reference without copying bytes, and dispatches through `IHttpClientFactory.CreateClient(SitecoreGraphQLFactory.NamedHttpClient)` (`"SitecoreGraphQL"`). This preserves `ReferenceEquals` on cached `IGraphQLClient` instances while allowing `IHttpClientFactory` to rotate pooled socket handlers every 2 minutes for DNS updates.
@@ -62,7 +64,44 @@ builder.Services.AddSitecoreGraphQL(builder.Configuration);
 - `AddSitecoreAuthentication(...)` (`Scoped` `ISitecoreTokenService`)
 - `AddSitecoreAuthenticationSingleton(...)` (`Singleton` `ISitecoreTokenService`)
 - Custom `ISitecoreTokenService` implementations implementing `IAsyncDisposable`
-- Hosts enforcing `ValidateScopes = true` and `ValidateOnBuild = true`
+- hosts enforcing `ValidateScopes = true` and `ValidateOnBuild = true`
+
+---
+
+## Typed Client Registrations
+
+Use `AddSitecoreGraphQL<TClient>(...)` and inject `ISitecoreGraphQLFactory<TClient>` when an application integrates multiple independent Sitecore GraphQL environments or OAuth authentication authorities in one DI container:
+
+```csharp
+services.AddSitecoreGraphQL<AuthoringConsumer>(options =>
+{
+    options.Endpoint = "https://authoring.sitecore/graphql";
+    options.ClientId = "authoring-id";
+    options.ClientSecret = "authoring-secret";
+})
+.ConfigureAuthentication(auth => auth
+    .ConfigureOptions(o => o.AuthTokenUrl = "https://auth-authoring.sitecore/oauth/token"))
+.ConfigureResilience(r => r.Retry.MaxRetryAttempts = 2)
+.ConfigureHttpClient(http => http.ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30)));
+```
+
+### Builder API and Coexistence
+
+- **`ISitecoreGraphQLBuilder<TClient>`** exposes `Services`, `ConfigureOptions(...)`, `ConfigureResilience(...)`, and `ConfigureHttpClient(...)`, plus fluent extension methods `.ConfigureAuthentication(...)` (`Scoped` / default lifetime) and `.ConfigureAuthenticationSingleton(...)` (`Singleton` lifetime) backed by [`SitecoreAPIAuthorization`](https://www.nuget.org/packages/SitecoreAPIAuthorization) `1.1.0`.
+- **No collision with `AddHttpClient<TClient>()`**: Typed options (`"Sitecore.API.Foundation.GraphQL.Options.<AssemblyQualifiedName>"`) and named HTTP pipelines (`"SitecoreGraphQL.<AssemblyQualifiedName>"`) are keyed by `typeof(TClient).AssemblyQualifiedName`, so registering `services.AddHttpClient<TClient>()` alongside `AddSitecoreGraphQL<TClient>()` never overwrites `TClient`'s own `HttpClient` or headers. Meanwhile, OpenTelemetry tags emit version-stable `client.type = typeof(TClient).ToString()` without assembly version metadata.
+- **Handler ordering and resilience idempotency**: Repeated calls to `AddSitecoreGraphQL<TClient>(...)` or `.ConfigureResilience(...)` reuse the existing builder and resilience pipeline without stacking duplicate handlers. Always call `.ConfigureResilience(...)` before adding inner delegating handlers via `.ConfigureHttpClient(...)` so resilience wraps outbound attempts at the intended position in the pipeline.
+- **`EnableInternalLoggingSetup = false` scope**: Suppressing internal `AddLogging()` registration is evaluated only on `AddSitecoreGraphQL<TClient>(configuration, sectionName)` (not on delegate overloads or chained `.ConfigureOptions(...)` calls).
+
+### Operational Notes, Token Cache Sizing, and Refresh Behavior
+
+- **Typed-first resolution with untyped fallback**: `SitecoreTokenCoordinator<TClient>` resolves `ISitecoreTokenService<TClient>` first inside each async scope; if omitted, it falls back to untyped `ISitecoreTokenService` and logs `EventId = 1202` (`Information`) once per coordinator instance (logging only `clientType`, never credentials). Missing both registrations throws an `InvalidOperationException` naming both `.ConfigureAuthentication(...)` and `AddSitecoreAuthentication(...)`.
+- **Deferred auth validation**: Because authentication resolution occurs lazily during token operations, hosts running with `ValidateOnBuild = true` still start cleanly if authentication is wired separately, and missing auth surfaces at first client use/token acquisition.
+- **Per-coordinator coalescing & scaling**: Each typed factory owns its own `SitecoreTokenCoordinator<TClient>` (coalescing bursts per `(ClientId, ClientSecret)` within `TClient`), `ConcurrentDictionary` client cache, and Polly pipeline partition table; memory and pipeline count scale linearly with the number of distinct `TClient` registrations.
+- **Token cache sizing and refresh paths**:
+  - When backed by `SitecoreAPIAuthorization`'s `SitecoreTokenService` and globally empty (`CacheSize == 0`), typed refreshes issue one `GetSitecoreAuthToken` call without `TryRefreshSitecoreAuthToken`.
+  - When `CacheSize > 0`, warm manual `RefreshTokenAsync()` issues one OAuth request, while a cold-partition manual refresh against a multi-credential cache or expired-token manual refresh issues up to `2` OAuth calls per cold/expired entry (up to `2N - 1` across `N` cold credential sets).
+  - On staggered `401 Unauthorized` bursts after a refresh or expiry-in-transit, the typed coordinator performs a stateless `InvokeGetTokenAsync` pre-check and short-circuits with `EventId = 1203` (`Debug`) when a newer token is already cached.
+  - Shared `SitecoreTokenCache` capacity defaults to `MaxCacheSize = 10` (`CleanupThreshold = 15` for opportunistic expired-token cleanup) on unnamed `SitecoreTokenServiceOptions` (`services.Configure<SitecoreTokenServiceOptions>(...)`); see [`SitecoreAPIAuthorization`](https://www.nuget.org/packages/SitecoreAPIAuthorization) for cache sizing details.
 
 ---
 
@@ -246,10 +285,10 @@ Register `SitecoreGraphQLDiagnostics.InstrumentationName` (`"Sitecore.API.Founda
   - `sitecore.graphql.token.requests` (`Counter<long>`) — Bearer token lookups
   - `sitecore.graphql.token.refreshes` (`Counter<long>`) — Coalesced OAuth token refresh executions
   - `sitecore.graphql.auth.retries` (`Counter<long>`) — `HTTP 401` retry attempts
-  - `sitecore.graphql.client_cache.evictions` (`Counter<long>`) — Dynamic client cache FIFO evictions
+  - `sitecore.graphql.client_cache.evictions` (`Counter<long>`) — Dynamic client cache FIFO evictions (tagged with `client.type` on typed factories; untagged on untyped factories)
   - `sitecore.graphql.token.refresh.duration` (`Histogram<double>`, `ms`) — Token refresh latency
 
-Token and authentication telemetry tags use bounded low-cardinality `client.name` values (configured named client key, `"default"`, or `"explicit"`), while `sitecore.graphql.client_cache.evictions` is emitted untagged; telemetry never includes raw URLs, query strings, client IDs, or secrets.
+Token and authentication telemetry tags use bounded low-cardinality `client.name` values (configured named client key, `"default"`, or `"explicit"`) plus `client.type` (`typeof(TClient).ToString()`) on typed factories. `sitecore.graphql.client_cache.evictions` emits only `client.type` on typed factories (never `client.name`) and remains untagged on untyped factories; telemetry never includes raw URLs, query strings, client IDs, or secrets.
 
 ---
 
@@ -265,3 +304,11 @@ Token and authentication telemetry tags use bounded low-cardinality `client.name
 2. **Non-loopback `http://` endpoints**: Non-loopback `http://` endpoints now throw `OptionsValidationException` / `ArgumentException` by default. Migrate to `https://` or set `AllowInsecureHttp = true` for trusted internal container endpoints.
 3. **`[Obsolete] ISitecoreTokenCache` (`CS0618`)**: `Sitecore.API.Foundation.GraphQL.ISitecoreTokenCache` remains binary-compatible as a pass-through adapter to `ISitecoreTokenService`, marked `[Obsolete]` for removal in `v2.0.0`. Remove direct references to the local cache interface or suppress `CS0618` during transition.
 4. **Removed unused `GraphQL` (`8.5.0`) server dependency**: `SitecoreAPIGraphQLClient` `1.0.0` depends only on `GraphQL.Client`, `GraphQL.Client.Abstractions`, and `GraphQL.Client.Serializer.Newtonsoft`. If your application directly referenced server-side `GraphQL` types transitively through `SitecoreAPIGraphQLClient`, add an explicit `<PackageReference Include="GraphQL" />` to your application project.
+
+---
+
+## Migration Notes from v1.0.0 to v1.1.0
+
+1. **Target Frameworks (`.NET 10.0` and `.NET 11.0`)**: `SitecoreAPIGraphQLClient` `1.1.0` targets `net10.0` and `net11.0` (built with C# `15.0` and `.NET SDK 11.0.100`) and drops `net8.0` and `net9.0` support.
+2. **Central Dependency Alignment (`SitecoreAPIAuthorization` `1.1.0` and `Microsoft.Extensions.*` `11.0.0`)**: `SitecoreAPIGraphQLClient` upgrades `SitecoreAPIAuthorization` to `1.1.0` and `Microsoft.Extensions.*` packages (`Http`, `Http.Resilience`, `Logging.Abstractions`, `Options`, `Options.ConfigurationExtensions`) to `11.0.0`. Consumers on `net10.0` should ensure their projects permit or align `Microsoft.Extensions.*` `>= 11.0.0`.
+3. **Adopting Typed Clients (`ISitecoreGraphQLFactory<TClient>`)**: Replace single-tenant workarounds or manual factory wrappers with `services.AddSitecoreGraphQL<TClient>(...).ConfigureAuthentication(...)` for isolated multi-endpoint GraphQL and OAuth pipelines without disturbing existing untyped `AddSitecoreGraphQL(...)` registrations.

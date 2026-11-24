@@ -7,6 +7,7 @@ using Shouldly;
 using Sitecore.API.Foundation.Authorization.Abstractions;
 using Sitecore.API.Foundation.Authorization.Models;
 using Sitecore.API.Foundation.GraphQL.Http;
+using Sitecore.API.Foundation.GraphQL.Internal;
 
 namespace Sitecore.API.Foundation.GraphQL.Tests;
 
@@ -205,6 +206,128 @@ public class TokenHandlerTests
 
         await unconfiguredHandler.ForceRefreshAsync(CancellationToken.None);
         strictUnconfiguredService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Named_options_handler_reads_retry_settings_and_credentials_independently_of_CurrentValue()
+    {
+        const string enabledOptionsName = "Client.Enabled";
+        const string disabledOptionsName = "Client.Disabled";
+
+        var unnamedOptions = new SitecoreGraphQLOptions
+        {
+            ClientId = "unnamed-id",
+            ClientSecret = "unnamed-secret",
+            EnableUnauthorizedRefresh = false,
+            MaxUnauthorizedRetries = 0
+        };
+        var enabledNamedOptions = new SitecoreGraphQLOptions
+        {
+            ClientId = "named-id",
+            ClientSecret = "named-secret",
+            EnableUnauthorizedRefresh = true,
+            MaxUnauthorizedRetries = 2
+        };
+
+        var optionsMonitor = new Mock<IOptionsMonitor<SitecoreGraphQLOptions>>(MockBehavior.Strict);
+        optionsMonitor.SetupGet(m => m.CurrentValue).Returns(unnamedOptions);
+        optionsMonitor.Setup(m => m.Get(enabledOptionsName)).Returns(enabledNamedOptions);
+
+        var coordinator = new Mock<ISitecoreTokenCoordinator>(MockBehavior.Strict);
+        coordinator
+            .Setup(c => c.GetTokenAsync(
+                It.Is<SitecoreAuthClientCredentials>(cred => cred.ClientId == "named-id" && cred.ClientSecret == "named-secret"),
+                null,
+                It.IsAny<CancellationToken>(),
+                false))
+            .ReturnsAsync((new SitecoreAuthToken("tok-1", DateTimeOffset.UtcNow.AddMinutes(5)), "tok-1"));
+
+        var refreshCount = 0;
+        coordinator
+            .Setup(c => c.RefreshTokenAsync(
+                It.Is<SitecoreAuthClientCredentials>(cred => cred.ClientId == "named-id" && cred.ClientSecret == "named-secret"),
+                It.IsAny<SitecoreAuthToken?>(),
+                It.IsAny<string?>(),
+                null,
+                It.IsAny<CancellationToken>(),
+                false))
+            .ReturnsAsync(() =>
+            {
+                var next = $"tok-{++refreshCount + 1}";
+                return (new SitecoreAuthToken(next, DateTimeOffset.UtcNow.AddMinutes(5)), next);
+            });
+
+        var inner = new SpyHandler((_, call) =>
+            call <= 2 ? new HttpResponseMessage(HttpStatusCode.Unauthorized) : new HttpResponseMessage(HttpStatusCode.OK));
+
+        using var namedHandler = new SitecoreTokenHandler(
+            coordinator.Object,
+            optionsMonitor.Object,
+            optionsName: enabledOptionsName)
+        {
+            InnerHandler = inner
+        };
+        using var client = new HttpClient(namedHandler);
+
+        using var response = await client.GetAsync("https://unit.test/graphql");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        inner.Calls.ShouldBe(3);
+        refreshCount.ShouldBe(2);
+        optionsMonitor.Verify(m => m.Get(enabledOptionsName), Times.AtLeastOnce);
+        optionsMonitor.VerifyGet(m => m.CurrentValue, Times.Never);
+
+        // Reverse check: CurrentValue enables 401 refresh, named options disables it.
+        var enabledUnnamedOptions = new SitecoreGraphQLOptions
+        {
+            ClientId = "unnamed-enabled-id",
+            ClientSecret = "unnamed-enabled-secret",
+            EnableUnauthorizedRefresh = true,
+            MaxUnauthorizedRetries = 3
+        };
+        var disabledNamedOptions = new SitecoreGraphQLOptions
+        {
+            ClientId = "disabled-id",
+            ClientSecret = "disabled-secret",
+            EnableUnauthorizedRefresh = false,
+            MaxUnauthorizedRetries = 3
+        };
+
+        var reverseMonitor = new Mock<IOptionsMonitor<SitecoreGraphQLOptions>>(MockBehavior.Strict);
+        reverseMonitor.SetupGet(m => m.CurrentValue).Returns(enabledUnnamedOptions);
+        reverseMonitor.Setup(m => m.Get(disabledOptionsName)).Returns(disabledNamedOptions);
+
+        var reverseCoordinator = new Mock<ISitecoreTokenCoordinator>(MockBehavior.Strict);
+        reverseCoordinator
+            .Setup(c => c.GetTokenAsync(
+                It.Is<SitecoreAuthClientCredentials>(cred => cred.ClientId == "disabled-id" && cred.ClientSecret == "disabled-secret"),
+                null,
+                It.IsAny<CancellationToken>(),
+                false))
+            .ReturnsAsync((new SitecoreAuthToken("tok-disabled", DateTimeOffset.UtcNow.AddMinutes(5)), "tok-disabled"));
+
+        var reverseInner = new SpyHandler((_, _) => new HttpResponseMessage(HttpStatusCode.Unauthorized));
+        using var disabledHandler = new SitecoreTokenHandler(
+            reverseCoordinator.Object,
+            reverseMonitor.Object,
+            optionsName: disabledOptionsName)
+        {
+            InnerHandler = reverseInner
+        };
+        using var disabledClient = new HttpClient(disabledHandler);
+
+        using var disabledResponse = await disabledClient.GetAsync("https://unit.test/graphql");
+
+        disabledResponse.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        reverseInner.Calls.ShouldBe(1);
+        reverseCoordinator.Verify(
+            c => c.GetTokenAsync(
+                It.Is<SitecoreAuthClientCredentials>(cred => cred.ClientId == "disabled-id" && cred.ClientSecret == "disabled-secret"),
+                null,
+                It.IsAny<CancellationToken>(),
+                false),
+            Times.Once);
+        reverseCoordinator.VerifyNoOtherCalls();
     }
 
     private sealed class AsyncBodySpyHandler : HttpMessageHandler

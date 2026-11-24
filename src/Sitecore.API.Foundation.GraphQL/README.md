@@ -11,12 +11,16 @@ Main NuGet class library (`SitecoreAPIGraphQLClient`) implementing thread-safe G
   - `Task<IGraphQLClient> CreateClientByNameAsync(string clientName, CancellationToken cancellationToken = default)`
   - `Task<bool> RefreshTokenAsync(CancellationToken cancellationToken = default)`
   - `Task<bool> RefreshTokenByNameAsync(string clientName, CancellationToken cancellationToken = default)` (includes default interface implementation delegating to `RefreshTokenAsync(cancellationToken)`)
-- `SitecoreGraphQLFactory` (`SitecoreGraphQLFactory.cs`, namespace `Sitecore.API.Foundation.GraphQL`):
+- `ISitecoreGraphQLFactory<TClient>` (`ISitecoreGraphQLFactory.cs`, namespace `Sitecore.API.Foundation.GraphQL`):
+  - `public interface ISitecoreGraphQLFactory<TClient> : ISitecoreGraphQLFactory where TClient : class`
+  - Consumer-scoped typed factory interface isolating per-type `SitecoreGraphQLOptions`, `HttpClient` pipelines, resilience policies, and typed token coordination without colliding with `AddHttpClient<TClient>()`.
+- `SitecoreGraphQLFactory` & `SitecoreGraphQLFactory<TClient>` (`SitecoreGraphQLFactory.cs`, namespace `Sitecore.API.Foundation.GraphQL`):
   - Implements `ISitecoreGraphQLFactory` and `IDisposable` (`Dispose()`, `protected virtual void Dispose(bool disposing)`).
   - `public const string NamedHttpClient = "SitecoreGraphQL"`
   - Constructors:
     - `public SitecoreGraphQLFactory(ISitecoreTokenService tokenService, IOptions<SitecoreGraphQLOptions> options, IHttpClientFactory httpClientFactory, ISitecoreTokenCache tokenCache, ILogger<SitecoreGraphQLFactory>? logger = null)` (retains v0.9.x 5-parameter public constructor compatibility)
-    - `internal SitecoreGraphQLFactory(ISitecoreTokenCoordinator coordinator, IOptionsMonitor<SitecoreGraphQLOptions> optionsMonitor, IHttpClientFactory httpClientFactory, ILogger<SitecoreGraphQLFactory>? logger = null)`
+    - `internal SitecoreGraphQLFactory(ISitecoreTokenCoordinator coordinator, IOptionsMonitor<SitecoreGraphQLOptions> optionsMonitor, IHttpClientFactory httpClientFactory, ILogger? logger = null, string? optionsName = null, string httpClientName = NamedHttpClient, string? clientTypeName = null)`
+  - `internal sealed class SitecoreGraphQLFactory<TClient> : SitecoreGraphQLFactory, ISitecoreGraphQLFactory<TClient> where TClient : class` constructs the typed factory passing `optionsName`, `httpClientName`, and `typeof(TClient).ToString()` for `client.type` telemetry.
   - Additional convenience overloads without `CancellationToken`: `CreateClientAsync(string url, string clientId, string clientSecret)`, `CreateClientAsync(string url)`, `CreateClientAsync()`.
 - `SitecoreGraphQLOptions` (`SitecoreGraphQLOptions.cs`, namespace `Sitecore.API.Foundation.GraphQL`):
   - `string? Endpoint { get; set; }` (default `null`)
@@ -40,14 +44,15 @@ Main NuGet class library (`SitecoreAPIGraphQLClient`) implementing thread-safe G
   - `internal enum GraphQLOptionsAssignedMask : uint` (`[Flags]`) and `internal enum GraphQLClientOptionsAssignedMask : byte` (`[Flags]`) tracking explicit property assignments.
 - `SitecoreGraphQLDiagnostics` (`SitecoreGraphQLDiagnostics.cs`, namespace `Sitecore.API.Foundation.GraphQL`):
   - `public const string InstrumentationName = "Sitecore.API.Foundation.GraphQL"`
-  - `internal static readonly ActivitySource ActivitySource = new(InstrumentationName, "1.0.0")`
-  - `internal static readonly Meter Meter = new(InstrumentationName, "1.0.0")`
+  - `internal static readonly ActivitySource ActivitySource = new(InstrumentationName, "1.1.0")`
+  - `internal static readonly Meter Meter = new(InstrumentationName, "1.1.0")`
   - `internal static readonly Counter<long> TokenRequests` (`"sitecore.graphql.token.requests"`)
   - `internal static readonly Counter<long> TokenRefreshes` (`"sitecore.graphql.token.refreshes"`)
   - `internal static readonly Counter<long> AuthRetries` (`"sitecore.graphql.auth.retries"`)
   - `internal static readonly Counter<long> ClientCacheEvictions` (`"sitecore.graphql.client_cache.evictions"`)
   - `internal static readonly Histogram<double> TokenRefreshDurationMs` (`"sitecore.graphql.token.refresh.duration"`, unit `"ms"`)
   - `internal static string GetClientTag(string? clientName, bool isExplicit = false)`
+  - Allocation-free tag helpers checking `!string.IsNullOrEmpty(clientTypeName)`: `RecordClientCounter(...)`, `RecordTokenRefreshDuration(...)`, `RecordClientCacheEviction(...)` (emits only `client.type` when non-empty; never emits `client.name`), and `SetClientTags(...)`.
 - Subdirectories & Contracts:
   - `Abstractions`: [./Abstractions/README.md](./Abstractions/README.md) - Core interfaces for token extraction (`ITokenValueAccessor`) and legacy caching (`ISitecoreTokenCache`).
   - `DependencyInjection`: [./DependencyInjection/README.md](./DependencyInjection/README.md) - `ServiceCollectionExtensions.AddSitecoreGraphQL` overloads, startup options validation, and resilience pipeline partitioning.
@@ -58,7 +63,7 @@ Main NuGet class library (`SitecoreAPIGraphQLClient`) implementing thread-safe G
 ## Invariants
 - Shared client instances: `IGraphQLClient` instances (`GraphQLHttpClient` configured with `NewtonsoftJsonSerializer`) are cached in `_clients` (`ConcurrentDictionary<ClientCacheKey, Lazy<CachedClientEntry>>`) and shared across callers; callers must not dispose returned instances manually.
 - Bounded dynamic client cache: Dynamic clients (`isConfiguredClient = false`) are tracked in `_dynamicEvictionQueue` and evicted in FIFO order when dynamic entries exceed `Math.Max(1, MaxCachedClients)`. Configured default and named clients (`isConfiguredClient = true`) are exempt from eviction.
-- Socket rotation preservation: Each cached `GraphQLHttpClient` is constructed over a lightweight `CredentialForwardingHandler` with `HttpClient.Timeout = Timeout.InfiniteTimeSpan`, delegating transport execution and timeouts to `IHttpClientFactory.CreateClient("SitecoreGraphQL")` so pooled socket handlers continue rotating every 2 minutes for DNS updates.
+- Socket rotation preservation: Each cached `GraphQLHttpClient` is constructed over a lightweight `CredentialForwardingHandler` with `HttpClient.Timeout = Timeout.InfiniteTimeSpan`, delegating transport execution and timeouts to `IHttpClientFactory.CreateClient(_httpClientName)` (where `_httpClientName` is `"SitecoreGraphQL"` for untyped factories or `$"SitecoreGraphQL.{typeName}"` for typed factories) so pooled socket handlers continue rotating every 2 minutes for DNS updates.
 - Endpoint security: Enforces `https://` (or loopback `http://localhost` / `http://127.0.0.1`) unless `AllowInsecureHttp = true`, and unconditionally rejects embedded `Uri.UserInfo`.
 - Secret and query-string redaction: Query strings (such as `?sc_apikey=...`) are stripped from logged/exception URIs and `ClientSecret` is always masked as `***` in `ToString()`.
 

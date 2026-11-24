@@ -65,3 +65,19 @@ public interface ISitecoreGraphQLFactory
     Task<bool> RefreshTokenByNameAsync(string clientName, CancellationToken cancellationToken = default)
         => RefreshTokenAsync(cancellationToken);
 }
+
+/// <summary>
+/// Typed factory for creating configured GraphQL clients scoped to a specific <typeparamref name="TClient"/> consumer.
+/// </summary>
+/// <typeparam name="TClient">
+/// The consumer class type whose isolated <see cref="SitecoreGraphQLOptions"/>, <see cref="System.Net.Http.HttpClient"/> pipeline,
+/// resilience policy, and typed token coordination are used.
+/// </typeparam>
+/// <remarks>
+/// Inject <see cref="ISitecoreGraphQLFactory{TClient}"/> to keep multiple Sitecore GraphQL endpoints or credential sets isolated
+/// without colliding with <c>AddHttpClient&lt;TClient&gt;()</c>.
+/// </remarks>
+public interface ISitecoreGraphQLFactory<TClient> : ISitecoreGraphQLFactory
+    where TClient : class
+{
+}
